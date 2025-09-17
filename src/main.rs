@@ -9,9 +9,11 @@ use anyhow::Result;
 use app::App;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
-use ratatui::backend::CrosstermBackend;
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 
 fn main() -> Result<()> {
     let workspace = std::env::current_dir()?;
@@ -52,7 +54,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
             match event::read()? {
                 Event::Key(key) => app.handle_key(key),
                 Event::Resize(_, _) => {}
-                Event::Mouse(_) => {}
+                Event::Mouse(mouse) => app.handle_mouse(mouse),
                 Event::Paste(data) => {
                     for ch in data.chars() {
                         let key = crossterm::event::KeyEvent::new(

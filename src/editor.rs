@@ -11,6 +11,7 @@ pub struct Editor {
     viewport_line: usize,
     viewport_height: usize,
     file_path: Option<PathBuf>,
+    dirty: bool,
 }
 
 impl Editor {
@@ -22,6 +23,7 @@ impl Editor {
             viewport_line: 0,
             viewport_height: 1,
             file_path: None,
+            dirty: false,
         }
     }
 
@@ -29,6 +31,7 @@ impl Editor {
         let mut editor = Self::new();
         editor.buffer = Rope::from_str(content);
         editor.clamp_cursor();
+        editor.dirty = false;
         editor
     }
 
@@ -42,6 +45,7 @@ impl Editor {
         self.viewport_line = 0;
         self.file_path = Some(path.to_path_buf());
         self.clamp_cursor();
+        self.dirty = false;
         Ok(())
     }
 
@@ -51,6 +55,7 @@ impl Editor {
         }
         let idx = self.char_index();
         self.buffer.insert_char(idx, ch);
+        self.dirty = true;
         if ch == '\n' {
             self.cursor_line += 1;
             self.cursor_col = 0;
@@ -72,6 +77,7 @@ impl Editor {
         let prev_idx = idx - 1;
         let ch = self.buffer.char(prev_idx);
         self.buffer.remove(prev_idx..idx);
+        self.dirty = true;
         if ch == '\n' {
             if self.cursor_line > 0 {
                 self.cursor_line -= 1;
@@ -134,6 +140,19 @@ impl Editor {
 
     pub fn file_path(&self) -> Option<&Path> {
         self.file_path.as_deref()
+    }
+
+    #[allow(dead_code)]
+    pub fn mark_saved(&mut self) {
+        self.dirty = false;
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    pub fn total_lines(&self) -> usize {
+        self.buffer.len_lines()
     }
 
     fn ensure_cursor_visible(&mut self) {

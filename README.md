@@ -1,27 +1,32 @@
 # Clide
 
-Clide 是一個以命令列為核心的多窗格 IDE 原型，專為結合 Rust 核心與 Python 代理流程而設計。介面借鑒 Microsoft Edit，提供檔案樹、編輯器、整合終端與代理面板四大區塊，支援鍵盤與滑鼠操作，並預留 LSP、Git 與 AI 同步的擴充能力。
+Clide 是一個命令列導向、可滑鼠操作的多窗格 IDE 原型，結合 Rust 核心與 Python 代理流程。介面借鑑 Microsoft Edit 的 VT framebuffer 配色，提供檔案樹、編輯器、整合終端與代理面板四大區塊，可依需求隱藏或拖曳調整尺寸，並支援鍵盤、滑鼠雙模式控制。
 
 ## 功能概覽
-- 三欄布局：左側檔案樹、中央編輯器+終端、右側代理建議。 
-- Ropey 驅動的文字緩衝區，支援基本插入、刪除、游標移動與捲動。 
-- 整合終端視窗，可滾動查看歷史輸出。 
-- 代理面板顯示 AI 建議與差異摘要，預留 IPC 介面供 Python 代理使用。 
-- 支援滑鼠與鍵盤快捷鍵：`Tab` 切換焦點、`Ctrl+Q` 離開、方向鍵操作。 
+- 三欄 + 上下功能列：檔案樹、中央編輯/終端堆疊、代理建議動態配置，隱藏後自動補位。
+- Ropey 駆動的文字緩衝區，提供插入/刪除、多方向游標與捲動，狀態列顯示語系、編碼、縮排與游標位置。
+- 內建終端輸出窗格，可捲動與放大；代理面板可逐條檢視 AI 建議。
+- 滑鼠支援：點擊切換焦點、雙擊開檔、拖曳分隔線調整大小、點擊標題快速顯示/隱藏 pane。
+- 預留 LSP、Git 與代理同步介面，`python/agent_stub.py` 示範 JSON IPC 流程。
 
 ## 建置與執行
 ```bash
-cargo run      # 以除錯模式建置並啟動 Clide
-cargo build    # 建置執行檔，產出於 target/debug/clide
-cargo build --release  # 最佳化建置，產出於 target/release/clide
+cargo run                 # 以除錯模式啟動 Clide
+cargo build               # 建置除錯版執行檔，位於 target/debug/clide
+cargo build --release     # 建置最佳化版本，位於 target/release/clide
 ```
 
+## 操作提示
+- 鍵盤：`Ctrl+Q` 離開、`Tab`/`Shift+Tab` 於已顯示 pane 間切換焦點、方向鍵/Enter 操控檔案樹與代理面板。
+- 滑鼠：點擊標題切換顯示、拖曳分隔線調整比例、滾輪捲動列表，狀態列前綴 `[*]` 代表尚未儲存。
+- 狀態列提供模式/編碼/縮排資訊與游標行列，便於即時掌握編輯狀態。
+
 ## 專案結構
-- `src/`: Rust 核心，含 `app.rs`, `editor.rs`, `ui.rs`。
-- `config/`: JSON 配置與主題/鍵盤映射範例。
-- `python/`: 代理範例及插件宣告，示範與核心協作方式。
+- `src/`: 核心邏輯 (`app.rs` 輸入/版面、`editor.rs` 緩衝管理、`ui.rs` 版面渲染)。
+- `config/`: 版面與主題設定 JSON。
+- `python/`: 代理示例與插件宣告，展示 Rust <-> Python IPC。
 
 ## 後續規劃
-- 接入真正的 LSP 與 Git 整合，實現語法提示與版本控制操作。
-- 定義代理通訊協定，完成即時同步與衝突處理。
-- 擴充插件系統，允許以 JSON/Python 描述命令、工作流與主題。
+- 串接 LSP、Git、實際終端子行程，完善 IDE 實用性。
+- 擴充代理 API 與權限控管，支援差異同步、批次接受建議。
+- 建立測試與自動化工作流程，確保 Pane 佈局與滑鼠交互穩定。
