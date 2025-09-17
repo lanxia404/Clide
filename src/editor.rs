@@ -134,6 +134,10 @@ impl Editor {
         (self.cursor_line, self.cursor_col)
     }
 
+    pub fn line(&self, line_idx: usize) -> ropey::RopeSlice<'_> {
+        self.buffer.line(line_idx)
+    }
+
     pub fn viewport_start(&self) -> usize {
         self.viewport_line
     }

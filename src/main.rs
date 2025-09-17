@@ -1,5 +1,8 @@
 mod app;
+mod definitions;
 mod editor;
+mod file_tree;
+mod panels;
 mod ui;
 
 use std::io::{self, stdout};

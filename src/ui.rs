@@ -3,7 +3,9 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, DividerKind, FileEntryKind, FocusArea, PaneKind, StatusControlKind};
+use crate::app::App;
+use crate::definitions::{DividerKind, FocusArea, PaneKind, StatusControlKind};
+use crate::file_tree::FileEntryKind;
 
 const BG_PRIMARY: Color = Color::Rgb(0, 0, 0);
 const BG_PANEL: Color = Color::Rgb(12, 12, 12);
@@ -447,7 +449,7 @@ fn render_editor(f: &mut Frame<'_>, app: &mut App, area: Rect) {
 
     let start_line = app.editor.viewport_start();
     let lines = app.editor.lines_in_viewport();
-    let (cursor_line, cursor_col) = app.editor.cursor();
+    let (cursor_line, cursor_char_col) = app.editor.cursor();
 
     let gutter_width: u16 = 7; // "0000 │ "
 
@@ -457,7 +459,7 @@ fn render_editor(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         .enumerate()
         .map(|(idx, content)| {
             let line_no = start_line + idx + 1;
-            let gutter = format!("{:>4} │ ", line_no);
+            let gutter = format!(/* "{:>4} │ " */ "{:>4} │ ", line_no);
             let mut spans = vec![Span::styled(gutter, Style::default().fg(FG_DIM))];
             let absolute_line = start_line + idx;
             let style = if absolute_line == cursor_line {
@@ -467,7 +469,8 @@ fn render_editor(f: &mut Frame<'_>, app: &mut App, area: Rect) {
             } else {
                 Style::default().fg(FG_PRIMARY)
             };
-            spans.push(Span::styled(content.clone(), style));
+            let processed_content = content.replace('\t', "    ");
+            spans.push(Span::styled(processed_content, style));
             Line::from(spans)
         })
         .collect();
@@ -505,13 +508,22 @@ fn render_editor(f: &mut Frame<'_>, app: &mut App, area: Rect) {
     f.render_widget(paragraph, area);
 
     if app.focus == FocusArea::Editor {
+        let line_slice = app.editor.line(cursor_line);
+        let portion_before_cursor = line_slice.slice(0..cursor_char_col);
+
+        let mut visual_col = 0;
+        for ch in portion_before_cursor.chars() {
+            visual_col += if ch == '\t' { 4 } else { 1 };
+        }
+
         let cursor_y = area.y + (cursor_line.saturating_sub(start_line)) as u16 + 1;
-        let cursor_x = area.x + gutter_width + cursor_col as u16 + 1;
+        let cursor_x = area.x + gutter_width + visual_col as u16;
         if cursor_y < area.y + area.height && cursor_x < area.x + area.width {
             f.set_cursor(cursor_x, cursor_y);
         }
     }
 }
+
 
 fn render_terminal(f: &mut Frame<'_>, app: &App, area: Rect) {
     let mut block = Block::default()
