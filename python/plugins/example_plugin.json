@@ -1,0 +1,7 @@
+{
+  "name": "example-agent-hook",
+  "entry_point": "agent_stub:main",
+  "capabilities": ["diff", "lsp-proxy", "commands"],
+  "requires": ["python>=3.10"],
+  "description": "Demonstrates how an AI agent process could be declared."
+}
