@@ -1,0 +1,43 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Windows target
+        run: rustup target add x86_64-pc-windows-gnu
+      - name: Install cross toolchain
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
+      - name: Build release targets
+        run: cargo run --bin dist --release
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clide-linux-and-windows
+          path: |
+            dist/clide
+            dist/clide.exe
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Windows release
+        run: cargo build --release
+      - name: Prepare artifact
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target\\release\\clide.exe dist\\clide-windows-msvc.exe
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clide-windows-msvc
+          path: dist\\clide-windows-msvc.exe

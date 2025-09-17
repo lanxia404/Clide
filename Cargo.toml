@@ -2,6 +2,15 @@
 name = "clide"
 version = "0.1.0"
 edition = "2024"
+default-run = "clide"
+
+[[bin]]
+name = "clide"
+path = "src/main.rs"
+
+[[bin]]
+name = "dist"
+path = "src/bin/dist.rs"
 
 [dependencies]
 anyhow = "1.0"
