@@ -1,6 +1,6 @@
 # Clide
 
-[![Build Status](https://github.com/user/Clide/actions/workflows/build.yml/badge.svg)](https://github.com/user/Clide/actions/workflows/build.yml)
+[![Build Status](https://github.com/lanxia404/Clide/actions/workflows/build.yml/badge.svg)](https://github.com/lanxia404/Clide/actions/workflows/build.yml)
 
 > Language: [English](README.md) · [繁體中文](README.zh.md)
 
