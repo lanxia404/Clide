@@ -144,7 +144,6 @@ impl LayoutState {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WrapMode {
     NoWrap,
@@ -287,6 +286,7 @@ pub enum StatusControlKind {
     LineEnding,
     Encoding,
     Indent,
+    HiddenFiles,
     Cursor,
     Dirty,
 }
@@ -326,8 +326,14 @@ pub enum MenuAction {
     ToggleEditor,
     ToggleTerminal,
     ToggleAgent,
+    New,
+    CreateFile,
     Open,
     Save,
+    SaveAs,
+    ToggleHiddenFiles,
+    Delete,
+    CommandPalette,
     Exit,
     None,
 }
@@ -409,12 +415,36 @@ impl MenuBar {
                 title: "檔案",
                 entries: vec![
                     MenuEntry {
+                        label: "新增空白檔案",
+                        action: MenuAction::New,
+                    },
+                    MenuEntry {
+                        label: "建立檔案…",
+                        action: MenuAction::CreateFile,
+                    },
+                    MenuEntry {
                         label: "開啟…",
                         action: MenuAction::Open,
                     },
                     MenuEntry {
                         label: "儲存",
                         action: MenuAction::Save,
+                    },
+                    MenuEntry {
+                        label: "另存新檔…",
+                        action: MenuAction::SaveAs,
+                    },
+                    MenuEntry {
+                        label: "切換隱藏檔案",
+                        action: MenuAction::ToggleHiddenFiles,
+                    },
+                    MenuEntry {
+                        label: "刪除檔案…",
+                        action: MenuAction::Delete,
+                    },
+                    MenuEntry {
+                        label: "指令面板…",
+                        action: MenuAction::CommandPalette,
                     },
                     MenuEntry {
                         label: "離開",

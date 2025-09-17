@@ -3,8 +3,9 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::App;
+use crate::app::{App, CommandPaletteState, ConfirmDeleteState, InputPromptState, OverlayState};
 use crate::definitions::{DividerKind, FocusArea, PaneKind, StatusControlKind};
+use crate::editor::Editor;
 use crate::file_tree::FileEntryKind;
 
 const BG_PRIMARY: Color = Color::Rgb(0, 0, 0);
@@ -26,8 +27,12 @@ const MENU_HIGHLIGHT_TEXT: Color = Color::Rgb(30, 30, 30);
 const BORDER_IDLE: Color = Color::Rgb(61, 120, 120);
 const BORDER_FOCUS: Color = Color::Rgb(187, 94, 0);
 const PANEL_HIGHLIGHT_BG: Color = Color::Rgb(120, 160, 255);
-const EDITOR_CURSOR_BG: Color = Color::Rgb(40, 40, 40);
-const EDITOR_HOVER_BG: Color = Color::Rgb(100, 130, 190);
+const EDITOR_LINE_HIGHLIGHT_BG: Color = Color::Rgb(108, 108, 108);
+const EDITOR_LINE_HIGHLIGHT_FG: Color = Color::Rgb(255, 255, 255);
+const EDITOR_HOVER_BG: Color = Color::Rgb(142, 142, 142);
+const EDITOR_SELECTION_BG: Color = Color::Rgb(0, 90, 181);
+const EDITOR_SELECTION_FG: Color = Color::Rgb(255, 255, 255);
+const GUTTER_FG: Color = Color::Rgb(173, 173, 173);
 
 fn cell_width(text: &str) -> u16 {
     UnicodeWidthStr::width(text).min(u16::MAX as usize) as u16
@@ -182,6 +187,10 @@ pub fn render(f: &mut Frame<'_>, app: &mut App) {
 
     if app.menu_bar.open {
         render_menu_dropdown(f, app, menu_area);
+    }
+
+    if let Some(overlay) = app.overlay.as_ref() {
+        render_overlay(f, app, overlay);
     }
 }
 
@@ -444,36 +453,7 @@ fn render_center(f: &mut Frame<'_>, app: &mut App, area: Rect) {
 }
 
 fn render_editor(f: &mut Frame<'_>, app: &mut App, area: Rect) {
-    let inner_height = area.height.saturating_sub(2) as usize;
-    app.editor.set_viewport_height(inner_height);
-
-    let start_line = app.editor.viewport_start();
-    let lines = app.editor.lines_in_viewport();
-    let (cursor_line, cursor_char_col) = app.editor.cursor();
-
     let gutter_width: u16 = 7; // "0000 │ "
-
-    let hover_line = app.editor_hover_line;
-    let text: Vec<Line> = lines
-        .iter()
-        .enumerate()
-        .map(|(idx, content)| {
-            let line_no = start_line + idx + 1;
-            let gutter = format!(/* "{:>4} │ " */ "{:>4} │ ", line_no);
-            let mut spans = vec![Span::styled(gutter, Style::default().fg(FG_DIM))];
-            let absolute_line = start_line + idx;
-            let style = if absolute_line == cursor_line {
-                Style::default().bg(EDITOR_CURSOR_BG).fg(Color::White)
-            } else if hover_line == Some(absolute_line) {
-                Style::default().bg(EDITOR_HOVER_BG).fg(Color::White)
-            } else {
-                Style::default().fg(FG_PRIMARY)
-            };
-            let processed_content = content.replace('\t', "    ");
-            spans.push(Span::styled(processed_content, style));
-            Line::from(spans)
-        })
-        .collect();
 
     let file_display = app
         .editor
@@ -499,31 +479,130 @@ fn render_editor(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         );
     }
 
-    let paragraph = Paragraph::new(text)
+    let inner = block.inner(area);
+    let inner_height = inner.height as usize;
+    let text_width = inner.width.saturating_sub(gutter_width).max(1) as usize;
+
+    app.editor.set_viewport(inner_height, text_width);
+
+    let start_line = app.editor.viewport_start();
+    let mut line_index = start_line;
+    let mut offset = app.editor.viewport_line_offset();
+    let total_lines = app.editor.total_lines();
+    let hover_line = app.editor_hover_line;
+    let (cursor_line, cursor_subline, cursor_col) = app.editor.cursor_visual_position();
+
+    let mut rows: Vec<Line> = Vec::new();
+    let mut cursor_row: Option<usize> = None;
+
+    while rows.len() < inner_height && line_index < total_lines {
+        let selection_ranges = app.editor.selection_display_ranges(line_index);
+        let segments = app.editor.visual_segments(line_index, text_width);
+        for (segment_idx, segment) in segments.into_iter().enumerate() {
+            if offset > 0 {
+                offset -= 1;
+                continue;
+            }
+
+            let highlight = line_index == cursor_line;
+            let hover = hover_line == Some(line_index);
+            let gutter_text = if segment_idx == 0 {
+                format!("{:>4} │ ", line_index + 1)
+            } else {
+                String::from("     │ ")
+            };
+
+            let mut spans = Vec::new();
+            let gutter_style = Style::default().fg(GUTTER_FG).bg(if highlight {
+                EDITOR_LINE_HIGHLIGHT_BG
+            } else {
+                BG_PANEL
+            });
+            spans.push(Span::styled(gutter_text, gutter_style));
+
+            let mut padded_segment = segment;
+            if padded_segment.len() < text_width {
+                padded_segment.push_str(&" ".repeat(text_width - padded_segment.len()));
+            }
+
+            let segment_start = segment_idx * text_width;
+            let segment_end = segment_start + text_width;
+            let overlaps: Vec<(usize, usize)> = selection_ranges
+                .iter()
+                .filter_map(|(start, end)| {
+                    let overlap_start = (*start).max(segment_start);
+                    let overlap_end = (*end).min(segment_end);
+                    if overlap_start < overlap_end {
+                        Some((overlap_start - segment_start, overlap_end - segment_start))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            for (chunk, selected) in split_segment_by_ranges(&padded_segment, &overlaps) {
+                if chunk.is_empty() {
+                    continue;
+                }
+                let mut style = if highlight {
+                    Style::default()
+                        .fg(EDITOR_LINE_HIGHLIGHT_FG)
+                        .bg(EDITOR_LINE_HIGHLIGHT_BG)
+                } else if hover {
+                    Style::default().fg(Color::White).bg(EDITOR_HOVER_BG)
+                } else {
+                    Style::default().fg(FG_PRIMARY).bg(BG_PANEL)
+                };
+                if selected {
+                    style = Style::default()
+                        .fg(EDITOR_SELECTION_FG)
+                        .bg(EDITOR_SELECTION_BG);
+                }
+                spans.push(Span::styled(chunk, style));
+            }
+
+            rows.push(Line::from(spans));
+            if highlight && segment_idx == cursor_subline {
+                cursor_row = Some(rows.len() - 1);
+            }
+
+            if rows.len() >= inner_height {
+                break;
+            }
+        }
+
+        offset = 0;
+        line_index += 1;
+    }
+
+    while rows.len() < inner_height {
+        let gutter_style = Style::default().fg(GUTTER_FG).bg(BG_PANEL);
+        let mut spans = Vec::new();
+        spans.push(Span::styled("     │ ".to_string(), gutter_style));
+        spans.push(Span::styled(
+            " ".repeat(text_width),
+            Style::default().fg(FG_DIM).bg(BG_PANEL),
+        ));
+        rows.push(Line::from(spans));
+    }
+
+    let paragraph = Paragraph::new(rows)
         .block(block)
         .wrap(Wrap { trim: false })
-        .scroll((0, 0))
         .style(Style::default().bg(BG_PANEL));
 
     f.render_widget(paragraph, area);
 
     if app.focus == FocusArea::Editor {
-        let line_slice = app.editor.line(cursor_line);
-        let portion_before_cursor = line_slice.slice(0..cursor_char_col);
-
-        let mut visual_col = 0;
-        for ch in portion_before_cursor.chars() {
-            visual_col += if ch == '\t' { 4 } else { 1 };
-        }
-
-        let cursor_y = area.y + (cursor_line.saturating_sub(start_line)) as u16 + 1;
-        let cursor_x = area.x + gutter_width + visual_col as u16;
-        if cursor_y < area.y + area.height && cursor_x < area.x + area.width {
-            f.set_cursor(cursor_x, cursor_y);
+        if let Some(row) = cursor_row {
+            let cursor_y = inner.y + row as u16;
+            let cursor_x = inner.x + gutter_width + cursor_col as u16;
+            if cursor_y < inner.y + inner.height && cursor_x < inner.x + inner.width {
+                f.set_cursor(cursor_x, cursor_y);
+            }
         }
     }
 }
-
 
 fn render_terminal(f: &mut Frame<'_>, app: &App, area: Rect) {
     let mut block = Block::default()
@@ -630,6 +709,17 @@ fn render_status_bar(f: &mut Frame<'_>, app: &mut App, area: Rect) {
             format!("[IND:{}]", app.preferences.indent.abbr()),
         ),
         (
+            Some(StatusControlKind::HiddenFiles),
+            format!(
+                "[HID:{}]",
+                if app.file_tree.show_hidden() {
+                    "ON"
+                } else {
+                    "OFF"
+                }
+            ),
+        ),
+        (
             Some(StatusControlKind::Cursor),
             format!("[POS:{}]", cursor_display),
         ),
@@ -676,4 +766,320 @@ fn render_status_bar(f: &mut Frame<'_>, app: &mut App, area: Rect) {
         .style(Style::default().fg(BAR_TEXT).bg(BAR_BG))
         .alignment(Alignment::Left);
     f.render_widget(paragraph, area);
+}
+
+fn render_overlay(f: &mut Frame<'_>, app: &App, overlay: &OverlayState) {
+    match overlay {
+        OverlayState::CommandPalette(state) => render_command_palette_overlay(f, state),
+        OverlayState::InputPrompt(state) => render_input_prompt_overlay(f, app, state),
+        OverlayState::ConfirmDelete(state) => render_confirm_delete_overlay(f, state),
+    }
+}
+
+fn split_segment_by_ranges(segment: &str, overlaps: &[(usize, usize)]) -> Vec<(String, bool)> {
+    let mut result: Vec<(String, bool)> = Vec::new();
+    let mut overlap_iter = overlaps.iter().peekable();
+    let mut display_pos = 0;
+    let mut current = String::new();
+    let mut current_selected = false;
+
+    for ch in segment.chars() {
+        while let Some((_, end)) = overlap_iter.peek() {
+            if display_pos >= *end {
+                overlap_iter.next();
+            } else {
+                break;
+            }
+        }
+        let selected = overlap_iter
+            .peek()
+            .map(|(start, end)| display_pos >= *start && display_pos < *end)
+            .unwrap_or(false);
+
+        if current.is_empty() {
+            current_selected = selected;
+        } else if selected != current_selected {
+            result.push((std::mem::take(&mut current), current_selected));
+            current_selected = selected;
+        }
+
+        current.push(ch);
+        display_pos += Editor::display_width(ch);
+    }
+
+    if !current.is_empty() {
+        result.push((current, current_selected));
+    }
+
+    if result.is_empty() {
+        result.push((String::new(), false));
+    }
+
+    result
+}
+
+fn render_command_palette_overlay(f: &mut Frame<'_>, state: &CommandPaletteState) {
+    let area = centered_rect(60, 70, f.size());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .title(Span::styled(
+            "指令面板",
+            Style::default().fg(BAR_TEXT).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(MENU_BORDER))
+        .style(Style::default().bg(MENU_BG));
+    f.render_widget(block.clone(), area);
+    let inner = block.inner(area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(2),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let filter_line = if state.filter.is_empty() {
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(FG_PRIMARY)),
+            Span::styled("輸入關鍵字以篩選", Style::default().fg(FG_DIM)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(FG_PRIMARY)),
+            Span::styled(
+                state.filter.as_str(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ])
+    };
+    let filter = Paragraph::new(filter_line)
+        .style(Style::default().bg(MENU_BG))
+        .alignment(Alignment::Left);
+    f.render_widget(filter, chunks[0]);
+
+    let max_visible = state.visible.len().min(chunks[1].height as usize);
+    let mut list_items: Vec<ListItem> = Vec::new();
+    let mut list_state = ListState::default();
+    if max_visible > 0 {
+        let selected = state.selected.min(state.visible.len().saturating_sub(1));
+        let start = if selected >= max_visible {
+            selected + 1 - max_visible
+        } else {
+            0
+        };
+        for (offset, idx) in state
+            .visible
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(max_visible)
+        {
+            let entry = &state.entries[*idx];
+            let mut spans = vec![Span::styled(
+                entry.label.clone(),
+                Style::default().fg(FG_PRIMARY),
+            )];
+            if let Some(detail) = entry.detail.as_ref() {
+                spans.push(Span::styled(
+                    format!("  {detail}"),
+                    Style::default().fg(FG_DIM),
+                ));
+            }
+            list_items.push(ListItem::new(Line::from(spans)));
+            if offset == selected {
+                list_state.select(Some(offset - start));
+            }
+        }
+    }
+
+    let list = List::new(list_items)
+        .block(Block::default().style(Style::default().bg(MENU_BG)))
+        .highlight_style(
+            Style::default()
+                .bg(PANEL_HIGHLIGHT_BG)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        )
+        .style(Style::default().bg(MENU_BG));
+    f.render_stateful_widget(list, chunks[1], &mut list_state);
+
+    let footer_text = if let Some(entry) = state.selected_entry() {
+        if let Some(detail) = entry.detail.as_ref() {
+            format!("Enter 執行 · Esc 關閉 · 快捷：{detail}")
+        } else {
+            String::from("Enter 執行 · Esc 關閉")
+        }
+    } else if state.visible.is_empty() {
+        String::from("無符合項目 · Esc 關閉")
+    } else {
+        String::from("Enter 執行 · Esc 關閉")
+    };
+    let footer = Paragraph::new(footer_text)
+        .style(Style::default().fg(FG_DIM).bg(MENU_BG))
+        .alignment(Alignment::Left);
+    f.render_widget(footer, chunks[2]);
+}
+
+fn render_input_prompt_overlay(f: &mut Frame<'_>, app: &App, state: &InputPromptState) {
+    let area = centered_rect(60, 30, f.size());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .title(Span::styled(
+            state.title.as_str(),
+            Style::default().fg(BAR_TEXT).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(MENU_BORDER))
+        .style(Style::default().bg(MENU_BG));
+    f.render_widget(block.clone(), area);
+    let inner = block.inner(area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let placeholder =
+        Paragraph::new(state.placeholder.as_str()).style(Style::default().fg(FG_DIM).bg(MENU_BG));
+    f.render_widget(placeholder, chunks[0]);
+
+    let mut input_spans = vec![Span::styled("> ", Style::default().fg(FG_PRIMARY))];
+    if state.value.is_empty() {
+        input_spans.push(Span::styled("(尚未輸入)", Style::default().fg(FG_DIM)));
+    } else {
+        input_spans.push(Span::styled(
+            state.value.as_str(),
+            Style::default().fg(Color::White),
+        ));
+    }
+    input_spans.push(Span::styled(" ▍", Style::default().fg(BORDER_FOCUS)));
+    let input = Paragraph::new(Line::from(input_spans))
+        .style(Style::default().bg(MENU_BG))
+        .alignment(Alignment::Left);
+    f.render_widget(input, chunks[1]);
+
+    let workspace_hint = Paragraph::new(format!("工作目錄：{}", app.workspace_root.display()))
+        .style(Style::default().fg(FG_DIM).bg(MENU_BG));
+    f.render_widget(workspace_hint, chunks[2]);
+
+    let message_area = chunks[3];
+    if let Some(error) = state.error.as_ref() {
+        let error_widget =
+            Paragraph::new(error.as_str()).style(Style::default().fg(Color::Red).bg(MENU_BG));
+        f.render_widget(error_widget, message_area);
+    } else {
+        let hint =
+            Paragraph::new("Enter 確認 · Esc 取消").style(Style::default().fg(FG_DIM).bg(MENU_BG));
+        f.render_widget(hint, message_area);
+    }
+}
+
+fn render_confirm_delete_overlay(f: &mut Frame<'_>, state: &ConfirmDeleteState) {
+    let area = centered_rect(50, 28, f.size());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .title(Span::styled(
+            "確認刪除",
+            Style::default().fg(BAR_TEXT).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(MENU_BORDER))
+        .style(Style::default().bg(MENU_BG));
+    f.render_widget(block.clone(), area);
+    let inner = block.inner(area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let message = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("即將刪除：", Style::default().fg(FG_DIM)),
+            Span::styled(state.display.as_str(), Style::default().fg(Color::White)),
+        ]),
+        Line::from(vec![Span::styled(
+            "此動作無法復原，確定要刪除此檔案嗎？",
+            Style::default().fg(FG_DIM),
+        )]),
+    ])
+    .style(Style::default().bg(MENU_BG));
+    f.render_widget(message, chunks[0]);
+
+    let buttons = {
+        let confirm_style = if state.selected_index == 0 {
+            Style::default()
+                .bg(PANEL_HIGHLIGHT_BG)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(BAR_TEXT)
+        };
+        let cancel_style = if state.selected_index == 1 {
+            Style::default()
+                .bg(PANEL_HIGHLIGHT_BG)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(BAR_TEXT)
+        };
+        Paragraph::new(Line::from(vec![
+            Span::styled(" [刪除] ", confirm_style),
+            Span::styled("  ", Style::default().bg(MENU_BG)),
+            Span::styled(" [取消] ", cancel_style),
+        ]))
+        .style(Style::default().bg(MENU_BG))
+        .alignment(Alignment::Center)
+    };
+    f.render_widget(buttons, chunks[1]);
+
+    let checkbox = Paragraph::new(Line::from(vec![
+        Span::styled(
+            if state.suppress_future { "[x]" } else { "[ ]" },
+            Style::default().fg(FG_PRIMARY),
+        ),
+        Span::styled(" 不再顯示此確認視窗", Style::default().fg(FG_DIM)),
+    ]))
+    .style(Style::default().bg(MENU_BG))
+    .alignment(Alignment::Left);
+    f.render_widget(checkbox, chunks[2]);
+
+    let hint = Paragraph::new("Enter 確認 · Space 勾選 · Esc 取消")
+        .style(Style::default().fg(FG_DIM).bg(MENU_BG))
+        .alignment(Alignment::Left);
+    f.render_widget(hint, chunks[3]);
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(horizontal[1])[1]
 }

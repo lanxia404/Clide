@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 struct BuildPlan {
     triple: Option<&'static str>,
@@ -28,7 +28,11 @@ fn main() -> Result<()> {
     let host_is_linux = cfg!(target_os = "linux");
 
     let mut plans = Vec::new();
-    let host_bin = if host_is_windows { "clide.exe" } else { "clide" };
+    let host_bin = if host_is_windows {
+        "clide.exe"
+    } else {
+        "clide"
+    };
     plans.push(BuildPlan {
         triple: None,
         path_components: vec!["target", "release", host_bin],
@@ -44,12 +48,7 @@ fn main() -> Result<()> {
     if host_is_linux {
         plans.push(BuildPlan {
             triple: Some("x86_64-pc-windows-gnu"),
-            path_components: vec![
-                "target",
-                "x86_64-pc-windows-gnu",
-                "release",
-                "clide.exe",
-            ],
+            path_components: vec!["target", "x86_64-pc-windows-gnu", "release", "clide.exe"],
             dest_name: "clide.exe",
             mark_executable: false,
             label: "交叉建置 Windows 版本",
@@ -110,11 +109,7 @@ fn build_target(manifest_dir: &Path, dist_dir: &Path, plan: BuildPlan) -> Result
         make_executable(&dest_path)?;
     }
 
-    println!(
-        ">> 完成：{} -> {}",
-        src_path.display(),
-        dest_path.display()
-    );
+    println!(">> 完成：{} -> {}", src_path.display(), dest_path.display());
     Ok(())
 }
 

@@ -25,6 +25,7 @@ pub struct FileTree {
     selected: usize,
     current_dir: PathBuf,
     expanded_dirs: HashSet<PathBuf>,
+    show_hidden: bool,
 }
 
 impl FileTree {
@@ -34,6 +35,7 @@ impl FileTree {
             selected: 0,
             current_dir: root,
             expanded_dirs: HashSet::new(),
+            show_hidden: false,
         };
         tree.refresh();
         tree
@@ -71,10 +73,13 @@ impl FileTree {
 
         for child in children {
             let name = match child.file_name().to_str() {
-                Some(name) if !name.starts_with('.') => name.to_string(),
-                Some(_) => continue,
+                Some(name) => name.to_string(),
                 None => continue,
             };
+
+            if !self.show_hidden && name.starts_with('.') {
+                continue;
+            }
 
             let path = self.canonicalize(&child.path());
             let is_dir = child.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
@@ -108,7 +113,10 @@ impl FileTree {
     }
 
     pub fn refresh(&mut self) {
-        let previously_selected = self.entries.get(self.selected).map(|entry| entry.path.clone());
+        let previously_selected = self
+            .entries
+            .get(self.selected)
+            .map(|entry| entry.path.clone());
 
         let current_canon = self.canonicalize(&self.current_dir);
         self.current_dir = current_canon.clone();
@@ -180,7 +188,10 @@ impl FileTree {
             },
             FileEntry {
                 name: String::from("../"),
-                path: canon.parent().map(|p| p.to_path_buf()).unwrap_or(canon.clone()),
+                path: canon
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or(canon.clone()),
                 depth: 0,
                 kind: FileEntryKind::ParentLink,
                 expanded: false,
@@ -238,6 +249,16 @@ impl FileTree {
 
     pub fn current_dir(&self) -> &PathBuf {
         &self.current_dir
+    }
+
+    pub fn show_hidden(&self) -> bool {
+        self.show_hidden
+    }
+
+    pub fn toggle_show_hidden(&mut self) -> bool {
+        self.show_hidden = !self.show_hidden;
+        self.refresh();
+        self.show_hidden
     }
 
     pub fn toggle_selected_directory(&mut self) {
