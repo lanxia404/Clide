@@ -20,7 +20,6 @@ cargo build --release  # 最佳化建置，產出於 target/release/clide
 - `src/`: Rust 核心，含 `app.rs`, `editor.rs`, `ui.rs`。
 - `config/`: JSON 配置與主題/鍵盤映射範例。
 - `python/`: 代理範例及插件宣告，示範與核心協作方式。
-- `AGENTS.md`: 倉庫指南（已加入 `.gitignore` 供本地參考）。
 
 ## 後續規劃
 - 接入真正的 LSP 與 Git 整合，實現語法提示與版本控制操作。
