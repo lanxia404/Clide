@@ -56,3 +56,4 @@ screen_shot/
 # Added by cargo
 
 /target
+.gemini/
