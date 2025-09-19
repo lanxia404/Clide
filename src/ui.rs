@@ -1,3 +1,4 @@
+use lsp_types::{Diagnostic, DiagnosticSeverity};
 use crate::app::{App, Focus};
 use crate::file_tree::TreeNode;
 use ratatui::{
