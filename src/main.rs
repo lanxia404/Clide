@@ -1,4 +1,3 @@
-
 pub mod app;
 pub mod editor;
 pub mod event;
@@ -13,6 +12,10 @@ use anyhow::Result;
 use app::App;
 use crossterm::event::{Event as CrosstermEvent, EventStream};
 use event::Event;
+use lsp_types::{
+    notification::{Notification, PublishDiagnostics},
+    PublishDiagnosticsParams,
+};
 use std::time::Duration;
 use tokio_stream::StreamExt;
 use tui::{init, restore};
@@ -22,24 +25,34 @@ use ui::render;
 async fn main() -> Result<()> {
     let mut tui = init()?;
     let mut app = App::new()?;
-    
+
     let mut stream = EventStream::new();
     let mut interval = tokio::time::interval(Duration::from_millis(250));
 
     while app.running {
         tui.draw(|frame| render(&mut app, frame))?;
-        
+
         let event = tokio::select! {
             _ = interval.tick() => Event::Tick,
+
             maybe_event = stream.next() => {
                 match maybe_event {
                     Some(Ok(CrosstermEvent::Key(key))) => Event::Key(key),
                     Some(Ok(CrosstermEvent::Mouse(mouse))) => Event::Mouse(mouse),
-                    // Ignore other crossterm events for now
                     Some(Ok(_)) => continue,
-                    // If the event stream ends or errors, we'll break the loop
                     Some(Err(_)) | None => break,
                 }
+            },
+
+            Some(lsp_message) = app.lsp_receiver.recv() => {
+                if let lsp::LspMessage::Notification(method, params) = lsp_message {
+                    if method == PublishDiagnostics::METHOD {
+                        if let Ok(diagnostics) = serde_json::from_value::<PublishDiagnosticsParams>(params) {
+                            app.diagnostics.insert(diagnostics.uri, diagnostics.diagnostics);
+                        }
+                    }
+                }
+                continue;
             }
         };
 
@@ -52,4 +65,3 @@ async fn main() -> Result<()> {
     restore()?;
     Ok(())
 }
-
