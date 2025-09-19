@@ -28,14 +28,32 @@ cargo build --release     # 建置最佳化版本，位於 target/release/clide
 - 狀態列按鈕可點擊切換換行、換行符、編碼、縮排與顯示游標位置；`[SAVE:*]` 表示檔案有未儲存變更，`[SAVE:OK]` 代表乾淨狀態。
 
 ## 專案結構
-- `src/main.rs`: 事件迴圈與 Crossterm/Ratatui 初始設定。
-- `src/app.rs`: 窗格配置、鍵盤/滑鼠處理、狀態訊息與偏好切換。
-- `src/editor.rs`: Ropey 緩衝管理、Unicode 寬度計算、游標/選取與視窗同步邏輯。
-- `src/file_tree.rs`: 檔案樹瀏覽、展開狀態與開檔/換目錄操作。
-- `src/panels/`: `terminal.rs` 管理終端輸出，`agent.rs` 儲存代理訊息列表。
-- `src/definitions.rs`: pane、分隔線、選單、狀態列控制等共用列舉與布局資料結構。
-- `config/`: 版面與主題設定 JSON。
-- `python/`: 代理示例與插件宣告，展示 Rust <-> Python IPC。
+- `src/main.rs`: 應用程式主入口。負責初始化 `tokio` runtime、日誌系統、設定並恢復終端機狀態，以及執行主事件迴圈。
+- `src/app/`: 應用程式核心邏輯模組。
+    - `mod.rs`: 宣告所有子模組，並重新導出 `App` 狀態結構。
+    - `state.rs`: 定義核心的 `App` 結構及所有 UI 元件的狀態 (如 `OverlayState`, `AgentComposer`)。
+    - `init.rs`: 負責 `App` 結構的初始化。
+    - `keyboard.rs`, `mouse.rs`: 分別處理鍵盤和滑鼠事件的分派。
+    - `layout.rs`, `overlays.rs`, `menu.rs`: 管理 UI 佈局、浮層和選單的邏輯。
+    - `files.rs`: 處理所有檔案系統相關的操作 (開啟、儲存、刪除)。
+    - `agent.rs`: 處理 `App` 與代理管理器之間互動的邏輯。
+    - `tick.rs`: 處理應用程式的定時更新事件。
+    - `actions.rs`: 集中處理所有使用者命令 (來自選單或指令面板) 的執行邏輯。
+- `src/agent/`: 代理管理與通訊模組。
+    - `manager.rs`: `AgentManager` 的所在地，負責代理的生命週期、設定檔管理和事件輪詢。
+    - `message.rs`: 定義 `AgentRequest` 和 `AgentResponse`，即應用程式與代理之間的通訊協定。
+    - `providers/`: 包含與不同代理後端通訊的具體實作。
+        - `http/`: 透過 HTTP API 與遠端服務 (如 OpenAI, Gemini) 通訊。
+        - `local_process.rs`: 透過標準輸入/輸出與本地子程序互動。
+- `src/ui/`: TUI 渲染邏輯模組。
+    - `mod.rs`: 包含所有 `ratatui` 的渲染函式，將 `App` 狀態繪製到終端機。
+    - `theme.rs`: 集中管理所有 UI 顏色常數。
+- `src/editor.rs`: 基於 `ropey` 的文字編輯器核心，處理文字緩衝、游標移動、語法高亮等。
+- `src/file_tree.rs`: 檔案樹的資料結構與遍歷邏輯。
+- `src/panels/`: 定義了 UI 中主要面板的資料結構 (如 `AgentPanel`, `TerminalPane`)。
+- `src/definitions.rs`: 包含整個專案共用的核心資料結構與列舉 (如 `FocusArea`, `LayoutState`, `CommandAction`)。
+- `python/`: 提供代理與外掛程式的範例 (`agent_stub.py`, `plugins/example_plugin.json`)，示範如何透過 JSON IPC 與主程式互動。
+- `config/`: 包含預設設定檔，如 `agents.example.toml`。
 
 ## 後續規劃
 - 串接 LSP、Git、實際終端子行程，完善 IDE 實用性。

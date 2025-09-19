@@ -35,8 +35,12 @@ fn main() -> Result<()> {
     };
     plans.push(BuildPlan {
         triple: None,
-        path_components: vec!["target", "release", host_bin],
-        dest_name: host_bin,
+        path_components: vec!["target", "debug", host_bin],
+        dest_name: if host_is_windows {
+            "Clide-debug.exe"
+        } else {
+            "Clide-debug"
+        },
         mark_executable: !host_is_windows,
         label: if host_is_windows {
             "建置 Windows 原生版本"
@@ -48,8 +52,8 @@ fn main() -> Result<()> {
     if host_is_linux {
         plans.push(BuildPlan {
             triple: Some("x86_64-pc-windows-gnu"),
-            path_components: vec!["target", "x86_64-pc-windows-gnu", "release", "clide.exe"],
-            dest_name: "clide.exe",
+            path_components: vec!["target", "x86_64-pc-windows-gnu", "debug", "clide.exe"],
+            dest_name: "Clide-debug.exe",
             mark_executable: false,
             label: "交叉建置 Windows 版本",
         });
@@ -66,7 +70,7 @@ fn main() -> Result<()> {
 fn build_target(manifest_dir: &Path, dist_dir: &Path, plan: BuildPlan) -> Result<()> {
     println!(">> {}", plan.label);
     let mut command = Command::new("cargo");
-    command.arg("build").arg("--release");
+    command.arg("build");
     if let Some(triple) = plan.triple {
         command.arg("--target").arg(triple);
     }

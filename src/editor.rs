@@ -1,10 +1,11 @@
-use anyhow::{Context, Result, anyhow};
+use crate::definitions::EditorPreferences;
+use anyhow::{anyhow, Context, Result};
 use ropey::Rope;
 use std::fs;
 use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthChar;
 
-/// 簡易文字編輯器，提供插入、刪除以及游標與視窗同步功能。
+/// A simple text editor providing insertion, deletion, and cursor/viewport syncing.
 pub struct Editor {
     buffer: Rope,
     cursor_line: usize,
@@ -16,10 +17,11 @@ pub struct Editor {
     file_path: Option<PathBuf>,
     dirty: bool,
     selection_anchor: Option<(usize, usize)>,
+    preferences: EditorPreferences,
 }
 
 impl Editor {
-    pub fn new() -> Self {
+    pub fn new(preferences: EditorPreferences) -> Self {
         Self {
             buffer: Rope::from_str(""),
             cursor_line: 0,
@@ -31,11 +33,13 @@ impl Editor {
             file_path: None,
             dirty: false,
             selection_anchor: None,
+            preferences,
         }
     }
 
-    pub fn with_placeholder(content: &str) -> Self {
-        let mut editor = Self::new();
+    #[allow(dead_code)]
+    pub fn with_placeholder(content: &str, preferences: EditorPreferences) -> Self {
+        let mut editor = Self::new(preferences);
         editor.buffer = Rope::from_str(content);
         editor.clamp_cursor();
         editor.dirty = false;
@@ -175,8 +179,8 @@ impl Editor {
         if text.ends_with('\n') {
             text.pop();
         }
-        let expanded = Self::expand_tabs(&text);
-        Self::wrap_text(&expanded, width.max(1))
+        let expanded = self.expand_tabs(&text);
+        self.wrap_text(&expanded, width.max(1))
     }
 
     pub fn cursor_visual_position(&self) -> (usize, usize, usize) {
@@ -201,14 +205,6 @@ impl Editor {
 
     pub fn clear_selection(&mut self) {
         self.selection_anchor = None;
-    }
-
-    pub fn start_selection_anchor(&mut self) {
-        self.selection_anchor = Some((self.cursor_line, self.cursor_col));
-    }
-
-    pub fn has_selection(&self) -> bool {
-        self.selection_positions().is_some()
     }
 
     pub fn selection_display_ranges(&self, line_idx: usize) -> Vec<(usize, usize)> {
@@ -274,13 +270,16 @@ impl Editor {
         self.buffer.len_lines()
     }
 
+    pub fn buffer_content(&self) -> String {
+        self.buffer.to_string()
+    }
+
     fn write_to(&mut self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty() {
                 fs::create_dir_all(parent)
                     .with_context(|| format!("無法建立目錄: {}", parent.display()))?;
             }
-        }
 
         let mut contents = String::new();
         for chunk in self.buffer.chunks() {
@@ -364,19 +363,13 @@ impl Editor {
     }
 
     fn display_columns_up_to(&self, line_idx: usize, char_col: usize) -> usize {
-        let mut display = 0;
-        let mut count = 0;
-        for ch in self.buffer.line(line_idx).chars() {
-            if ch == '\n' {
-                break;
-            }
-            if count >= char_col {
-                break;
-            }
-            display += Self::display_width(ch);
-            count += 1;
-        }
-        display
+        self.buffer
+            .line(line_idx)
+            .chars()
+            .take_while(|ch| *ch != '\n')
+            .take(char_col)
+            .map(|ch| self.display_width(ch))
+            .sum()
     }
 
     fn char_col_from_display(&self, line_idx: usize, display_col: usize) -> usize {
@@ -386,7 +379,7 @@ impl Editor {
             if ch == '\n' {
                 break;
             }
-            let w = Self::display_width(ch);
+            let w = self.display_width(ch);
             if display + w > display_col {
                 break;
             }
@@ -480,9 +473,9 @@ impl Editor {
         }
     }
 
-    pub fn display_width(ch: char) -> usize {
+    pub fn display_width(&self, ch: char) -> usize {
         if ch == '\t' {
-            4
+            self.preferences.tab_width
         } else {
             UnicodeWidthChar::width(ch).unwrap_or(1).max(1)
         }
@@ -610,7 +603,7 @@ impl Editor {
                 break;
             }
             col += if ch == '\t' {
-                4
+                self.preferences.tab_width
             } else {
                 ch.width().unwrap_or(1)
             };
@@ -623,11 +616,11 @@ impl Editor {
         segments.len().max(1)
     }
 
-    fn expand_tabs(text: &str) -> String {
-        text.replace('\t', "    ")
+    fn expand_tabs(&self, text: &str) -> String {
+        text.replace('\t', &" ".repeat(self.preferences.tab_width))
     }
 
-    fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    fn wrap_text(&self, text: &str, width: usize) -> Vec<String> {
         if width == 0 {
             return vec![String::new()];
         }
@@ -636,7 +629,7 @@ impl Editor {
         let mut width_acc = 0;
 
         for ch in text.chars() {
-            let w = Self::display_width(ch);
+            let w = self.display_width(ch);
             if width_acc + w > width && !current.is_empty() {
                 segments.push(current.clone());
                 current.clear();

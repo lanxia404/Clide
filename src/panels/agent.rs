@@ -1,62 +1,67 @@
-pub struct AgentMessage {
-    pub title: String,
-    pub detail: String,
-}
+use crate::agent::{AgentConversation, AgentPanelEntry, AgentResponse};
 
 pub struct AgentPanel {
-    messages: Vec<AgentMessage>,
-    selected: usize,
+    conversation: AgentConversation,
 }
 
 impl AgentPanel {
     pub fn with_placeholder() -> Self {
-        let messages = vec![
-            AgentMessage {
-                title: String::from("代理狀態"),
-                detail: String::from("等待 AI 編輯建議"),
-            },
-            AgentMessage {
-                title: String::from("變更預覽"),
-                detail: String::from("main.rs 第 10 行新增 println!"),
-            },
-        ];
-        Self {
-            messages,
-            selected: 0,
-        }
+        let entry = AgentPanelEntry::Info {
+            title: String::from("代理狀態"),
+            detail: String::from("代理尚未連線"),
+        };
+        let conversation = AgentConversation::with_entry(entry);
+        Self { conversation }
     }
 
-    pub fn messages(&self) -> &[AgentMessage] {
-        &self.messages
+    pub fn entries(&self) -> &[AgentPanelEntry] {
+        self.conversation.entries()
+    }
+
+    pub fn push_response(&mut self, response: AgentResponse) {
+        self.conversation.push(AgentPanelEntry::Response(response));
+    }
+
+    pub fn push_user_prompt(&mut self, prompt: impl Into<String>) {
+        self.conversation.push(AgentPanelEntry::UserPrompt {
+            prompt: prompt.into(),
+        });
+    }
+
+    pub fn push_info(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+        self.conversation.push(AgentPanelEntry::Info {
+            title: title.into(),
+            detail: detail.into(),
+        });
+    }
+
+    pub fn push_error(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+        self.conversation.push(AgentPanelEntry::Error {
+            title: title.into(),
+            detail: detail.into(),
+        });
+    }
+
+    pub fn push_tool_output(&mut self, tool: impl Into<String>, detail: impl Into<String>) {
+        self.conversation.push(AgentPanelEntry::ToolOutput {
+            tool: tool.into(),
+            detail: detail.into(),
+        });
     }
 
     pub fn move_selection(&mut self, delta: isize) {
-        if self.messages.is_empty() {
-            return;
-        }
-        let len = self.messages.len() as isize;
-        let mut new_index = self.selected as isize + delta;
-        if new_index < 0 {
-            new_index = 0;
-        }
-        if new_index >= len {
-            new_index = len - 1;
-        }
-        self.selected = new_index as usize;
+        self.conversation.move_selection(delta);
     }
 
-    pub fn selected_message(&self) -> Option<&AgentMessage> {
-        self.messages.get(self.selected)
+    pub fn selected_entry(&self) -> Option<&AgentPanelEntry> {
+        self.conversation.selected()
     }
 
     pub fn selected_index(&self) -> usize {
-        self.selected
+        self.conversation.selected_index()
     }
 
     pub fn set_selection(&mut self, index: usize) {
-        if self.messages.is_empty() {
-            return;
-        }
-        self.selected = index.min(self.messages.len().saturating_sub(1));
+        self.conversation.set_selection(index);
     }
 }

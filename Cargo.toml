@@ -14,7 +14,7 @@ path = "src/bin/dist.rs"
 
 [dependencies]
 anyhow = "1.0"
-crossterm = "0.27"
+crossterm = { version = "0.27", features = ["event-stream"] }
 ratatui = { version = "0.26", default-features = false, features = ["crossterm"] }
 ropey = "1.6"
 serde = { version = "1.0", features = ["derive"] }
@@ -22,3 +22,12 @@ serde_json = "1.0"
 thiserror = "1.0"
 walkdir = "2.5"
 unicode-width = "0.1"
+reqwest = { version = "0.12.23", features = ["json", "stream"] }
+tokio = { version = "1.47.1", features = ["full"] }
+futures-util = "0.3.31"
+async-trait = "0.1.89"
+toml = "0.8"
+log = "0.4"
+env_logger = "0.11"
+log4rs = { version = "1.4.0", features = ["yaml_format", "gzip"] }
+serde_yaml = "0.9.34"

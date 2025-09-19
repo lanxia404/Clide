@@ -1,4 +1,4 @@
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +74,104 @@ impl LayoutState {
             editor_ratio: 0.7,
             ..Default::default()
         }
+    }
+
+    pub fn calculate(&mut self, workspace: Rect) {
+        self.begin_frame(workspace);
+
+        #[derive(Clone, Copy)]
+        enum ColumnKind {
+            Center,
+            Pane(PaneKind),
+        }
+
+        let mut column_kinds = Vec::new();
+        let mut constraints = Vec::new();
+        let mut remaining_pct: i32 = 100;
+
+        if self.tree_visible {
+            let mut pct = (self.tree_ratio * 100.0).round() as i32;
+            pct = pct.clamp(10, 60);
+            pct = pct.min((remaining_pct - 20).max(10));
+            constraints.push(Constraint::Percentage(pct as u16));
+            column_kinds.push(ColumnKind::Pane(PaneKind::FileTree));
+            remaining_pct -= pct;
+        }
+
+        let mut agent_pct_val = 0;
+        if self.agent_visible {
+            let reserve = if remaining_pct > 20 {
+                remaining_pct - 20
+            } else {
+                remaining_pct
+            };
+            agent_pct_val = (self.agent_ratio * 100.0).round() as i32;
+            agent_pct_val = agent_pct_val.clamp(12, reserve.max(12));
+            remaining_pct -= agent_pct_val;
+        }
+
+        let center_pct = remaining_pct.max(10);
+        constraints.push(Constraint::Percentage(center_pct as u16));
+        column_kinds.push(ColumnKind::Center);
+
+        if self.agent_visible {
+            constraints.push(Constraint::Percentage(agent_pct_val as u16));
+            column_kinds.push(ColumnKind::Pane(PaneKind::Agent));
+        }
+
+        let column_areas = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(constraints)
+            .split(workspace);
+
+        let mut tree_area = None;
+        let mut center_area = None;
+        let mut agent_area = None;
+
+        for (kind, area) in column_kinds.iter().zip(column_areas.iter().copied()) {
+            match kind {
+                ColumnKind::Pane(PaneKind::FileTree) => tree_area = Some(area),
+                ColumnKind::Pane(PaneKind::Agent) => agent_area = Some(area),
+                ColumnKind::Center => center_area = Some(area),
+                _ => {}
+            }
+        }
+
+        if let Some(area) = tree_area {
+            self.register_pane(PaneKind::FileTree, area);
+        }
+        if let Some(area) = agent_area {
+            self.register_pane(PaneKind::Agent, area);
+        }
+        if let Some(area) = center_area {
+            self.register_center_area(area);
+        }
+
+        if tree_area.is_some()
+            && let Some(center) = center_area {
+                let x = center.x.saturating_sub(1);
+                let width = if center.x > 0 { 2 } else { 1 };
+                let divider = Rect {
+                    x,
+                    y: workspace.y,
+                    width,
+                    height: workspace.height,
+                };
+                self.register_divider(DividerKind::TreeCenter, divider);
+            }
+
+        if let Some(agent) = agent_area
+            && center_area.is_some() {
+                let x = agent.x.saturating_sub(1);
+                let width = if agent.x > 0 { 2 } else { 1 };
+                let divider = Rect {
+                    x,
+                    y: workspace.y,
+                    width,
+                    height: workspace.height,
+                };
+                self.register_divider(DividerKind::CenterAgent, divider);
+            }
     }
 
     pub fn begin_frame(&mut self, workspace: Rect) {
@@ -267,6 +365,7 @@ pub struct EditorPreferences {
     pub line_ending: LineEnding,
     pub encoding: EncodingKind,
     pub indent: IndentKind,
+    pub tab_width: usize,
 }
 
 impl EditorPreferences {
@@ -276,6 +375,7 @@ impl EditorPreferences {
             line_ending: LineEnding::Lf,
             encoding: EncodingKind::Utf8,
             indent: IndentKind::Spaces(4),
+            tab_width: 4,
         }
     }
 }
@@ -318,14 +418,12 @@ impl StatusControlRegistry {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
-    ToggleWrap,
-    ToggleLineEnding,
-    ToggleEncoding,
-    CycleIndent,
     ToggleFileTree,
     ToggleEditor,
     ToggleTerminal,
     ToggleAgent,
+    ManageAgentPanel,
+    SwitchAgent,
     New,
     CreateFile,
     Open,
@@ -473,27 +571,6 @@ impl MenuBar {
                 }],
             },
             MenuItem {
-                title: "格式",
-                entries: vec![
-                    MenuEntry {
-                        label: "切換換行",
-                        action: MenuAction::ToggleWrap,
-                    },
-                    MenuEntry {
-                        label: "切換換行符",
-                        action: MenuAction::ToggleLineEnding,
-                    },
-                    MenuEntry {
-                        label: "切換編碼",
-                        action: MenuAction::ToggleEncoding,
-                    },
-                    MenuEntry {
-                        label: "切換縮排",
-                        action: MenuAction::CycleIndent,
-                    },
-                ],
-            },
-            MenuItem {
                 title: "視窗",
                 entries: vec![
                     MenuEntry {
@@ -511,6 +588,19 @@ impl MenuBar {
                     MenuEntry {
                         label: "切換代理面板",
                         action: MenuAction::ToggleAgent,
+                    },
+                ],
+            },
+            MenuItem {
+                title: "代理",
+                entries: vec![
+                    MenuEntry {
+                        label: "管理代理面板",
+                        action: MenuAction::ManageAgentPanel,
+                    },
+                    MenuEntry {
+                        label: "更換代理…",
+                        action: MenuAction::SwitchAgent,
                     },
                 ],
             },

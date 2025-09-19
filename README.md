@@ -27,14 +27,32 @@ cargo build --release   # Produce an optimized release binary
 ```
 
 ## Project Layout
-- `src/main.rs` – Crossterm/Ratatui bootstrap and event loop.
-- `src/app.rs` – Pane orchestration, input routing, menu actions, and status messaging.
-- `src/editor.rs` – Ropey text buffer, Unicode width calculations, cursor/selection syncing, and viewport management.
-- `src/file_tree.rs` – Directory traversal, expansion state, hidden file toggles, and file/directory activation.
-- `src/panels/` – `terminal.rs` for scrollable terminal output, `agent.rs` for AI suggestion streams.
-- `src/definitions.rs` – Shared enums, menu/toolbar layouts, pane geometry, and divider metadata.
-- `python/` – Agent IPC sample (`agent_stub.py`) and plugin manifests.
-- `config/` – Layout presets and future theme/keybinding configuration.
+- `src/main.rs`: Main application entry point. Initializes the `tokio` runtime, logging, sets up and restores the terminal, and runs the main event loop.
+- `src/app/`: Core application logic module.
+    - `mod.rs`: Declares all submodules and re-exports the main `App` state struct.
+    - `state.rs`: Defines the core `App` struct and all UI component states (e.g., `OverlayState`, `AgentComposer`).
+    - `init.rs`: Responsible for the initialization of the `App` struct.
+    - `keyboard.rs`, `mouse.rs`: Handle keyboard and mouse event dispatch, respectively.
+    - `layout.rs`, `overlays.rs`, `menu.rs`: Manage UI layout, overlays, and menu logic.
+    - `files.rs`: Handles all file system-related operations (open, save, delete).
+    - `agent.rs`: Logic for the interaction between the `App` and the agent manager.
+    - `tick.rs`: Handles the application's periodic update events.
+    - `actions.rs`: Centralizes the execution logic for all user commands (from menus or the command palette).
+- `src/agent/`: Agent management and communication module.
+    - `manager.rs`: Home of the `AgentManager`, which is responsible for the agent lifecycle, profile management, and event polling.
+    - `message.rs`: Defines `AgentRequest` and `AgentResponse`, the communication protocol between the app and agents.
+    - `providers/`: Contains concrete implementations for communicating with different agent backends.
+        - `http/`: Communicates with remote services (like OpenAI, Gemini) via HTTP APIs.
+        - `local_process.rs`: Interacts with local subprocesses via stdio.
+- `src/ui/`: TUI rendering logic module.
+    - `mod.rs`: Contains all `ratatui` rendering functions that draw the `App` state to the terminal.
+    - `theme.rs`: Centralizes all UI color constants.
+- `src/editor.rs`: The core text editor based on `ropey`, handling the text buffer, cursor movement, syntax highlighting, etc.
+- `src/file_tree.rs`: Data structure and traversal logic for the file tree.
+- `src/panels/`: Defines the data structures for the main UI panels (e.g., `AgentPanel`, `TerminalPane`).
+- `src/definitions.rs`: Contains core data structures and enums shared across the project (e.g., `FocusArea`, `LayoutState`, `CommandAction`).
+- `python/`: Provides agent and plugin examples (`agent_stub.py`, `plugins/example_plugin.json`), demonstrating interaction with the main program via JSON IPC.
+- `config/`: Contains default configuration files, such as `agents.example.toml`.
 
 ## Roadmap
 - Integrate LSP, Git, and process management to graduate from prototype to daily driver.

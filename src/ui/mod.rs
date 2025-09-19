@@ -1,38 +1,18 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::app::{App, CommandPaletteState, ConfirmDeleteState, InputPromptState, OverlayState};
+use crate::agent::AgentPanelEntry;
+use crate::app::{
+    AgentSwitcherState, App, CommandPaletteState, ConfirmDeleteState, InputPromptState,
+    OverlayState,
+};
 use crate::definitions::{DividerKind, FocusArea, PaneKind, StatusControlKind};
-use crate::editor::Editor;
 use crate::file_tree::FileEntryKind;
 
-const BG_PRIMARY: Color = Color::Rgb(0, 0, 0);
-const BG_PANEL: Color = Color::Rgb(12, 12, 12);
-const FG_PRIMARY: Color = Color::Rgb(190, 190, 190);
-const FG_DIM: Color = Color::Rgb(128, 128, 128);
-
-const BAR_BG: Color = Color::Rgb(23, 52, 127);
-const BAR_TEXT: Color = Color::Rgb(235, 240, 255);
-const BAR_HIGHLIGHT_BG: Color = Color::Rgb(73, 102, 177);
-const BAR_HIGHLIGHT_TEXT: Color = Color::Rgb(255, 255, 255);
-
-const MENU_BG: Color = Color::Rgb(79, 79, 79);
-const MENU_BORDER: Color = Color::Rgb(208, 208, 208);
-const MENU_TEXT: Color = Color::Rgb(240, 240, 240);
-const MENU_HIGHLIGHT_BG: Color = Color::Rgb(220, 220, 220);
-const MENU_HIGHLIGHT_TEXT: Color = Color::Rgb(30, 30, 30);
-
-const BORDER_IDLE: Color = Color::Rgb(61, 120, 120);
-const BORDER_FOCUS: Color = Color::Rgb(187, 94, 0);
-const PANEL_HIGHLIGHT_BG: Color = Color::Rgb(120, 160, 255);
-const EDITOR_LINE_HIGHLIGHT_BG: Color = Color::Rgb(108, 108, 108);
-const EDITOR_LINE_HIGHLIGHT_FG: Color = Color::Rgb(255, 255, 255);
-const EDITOR_HOVER_BG: Color = Color::Rgb(142, 142, 142);
-const EDITOR_SELECTION_BG: Color = Color::Rgb(0, 90, 181);
-const EDITOR_SELECTION_FG: Color = Color::Rgb(255, 255, 255);
-const GUTTER_FG: Color = Color::Rgb(173, 173, 173);
+mod theme;
+use theme::*;
 
 fn cell_width(text: &str) -> u16 {
     UnicodeWidthStr::width(text).min(u16::MAX as usize) as u16
@@ -70,118 +50,20 @@ pub fn render(f: &mut Frame<'_>, app: &mut App) {
     let workspace = vertical[1];
     let status_area = vertical[2];
 
-    app.layout.begin_frame(workspace);
-
-    #[derive(Clone, Copy)]
-    enum ColumnKind {
-        Center,
-        Pane(PaneKind),
-    }
-
-    let mut column_kinds = Vec::new();
-    let mut constraints = Vec::new();
-    let mut remaining_pct: i32 = 100;
-
-    if app.layout.tree_visible {
-        let mut pct = (app.layout.tree_ratio * 100.0).round() as i32;
-        pct = pct.clamp(10, 60);
-        pct = pct.min((remaining_pct - 20).max(10));
-        constraints.push(Constraint::Percentage(pct as u16));
-        column_kinds.push(ColumnKind::Pane(PaneKind::FileTree));
-        remaining_pct -= pct;
-    }
-
-    let mut agent_pct_val = 0;
-    if app.layout.agent_visible {
-        let reserve = if remaining_pct > 20 {
-            remaining_pct - 20
-        } else {
-            remaining_pct
-        };
-        agent_pct_val = (app.layout.agent_ratio * 100.0).round() as i32;
-        agent_pct_val = agent_pct_val.clamp(12, reserve.max(12));
-        remaining_pct -= agent_pct_val;
-    }
-
-    let center_pct = remaining_pct.max(10);
-    constraints.push(Constraint::Percentage(center_pct as u16));
-    column_kinds.push(ColumnKind::Center);
-
-    if app.layout.agent_visible {
-        constraints.push(Constraint::Percentage(agent_pct_val as u16));
-        column_kinds.push(ColumnKind::Pane(PaneKind::Agent));
-    }
-
-    let column_areas = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(constraints)
-        .split(workspace);
-
-    let mut tree_area = None;
-    let mut center_area = None;
-    let mut agent_area = None;
-
-    for (kind, area) in column_kinds.iter().zip(column_areas.iter().copied()) {
-        match kind {
-            ColumnKind::Pane(PaneKind::FileTree) => tree_area = Some(area),
-            ColumnKind::Pane(PaneKind::Agent) => agent_area = Some(area),
-            ColumnKind::Center => center_area = Some(area),
-            _ => {}
-        }
-    }
-
-    if let Some(area) = tree_area {
-        app.layout.register_pane(PaneKind::FileTree, area);
-    }
-    if let Some(area) = agent_area {
-        app.layout.register_pane(PaneKind::Agent, area);
-    }
-    if let Some(area) = center_area {
-        app.layout.register_center_area(area);
-    }
-
-    if tree_area.is_some() {
-        if let Some(center) = center_area {
-            let x = center.x.saturating_sub(1);
-            let width = if center.x > 0 { 2 } else { 1 };
-            let divider = Rect {
-                x,
-                y: workspace.y,
-                width,
-                height: workspace.height,
-            };
-            app.layout
-                .register_divider(DividerKind::TreeCenter, divider);
-        }
-    }
-
-    if let Some(agent) = agent_area {
-        if center_area.is_some() {
-            let x = agent.x.saturating_sub(1);
-            let width = if agent.x > 0 { 2 } else { 1 };
-            let divider = Rect {
-                x,
-                y: workspace.y,
-                width,
-                height: workspace.height,
-            };
-            app.layout
-                .register_divider(DividerKind::CenterAgent, divider);
-        }
-    }
+    app.layout.calculate(workspace);
 
     app.menu_bar.layout.reset(app.menu_bar.items.len());
     app.status_controls.clear();
 
     render_menu_bar(f, app, menu_area);
-    if let Some(area) = tree_area.filter(|_| app.layout.tree_visible) {
-        render_file_tree(f, app, area);
+    if let Some(geom) = app.layout.pane_geometry(PaneKind::FileTree) {
+        render_file_tree(f, app, geom.area);
     }
-    if let Some(area) = center_area {
+    if let Some(area) = app.layout.center_area() {
         render_center(f, app, area);
     }
-    if let Some(area) = agent_area.filter(|_| app.layout.agent_visible) {
-        render_agent(f, app, area);
+    if let Some(geom) = app.layout.pane_geometry(PaneKind::Agent) {
+        render_agent(f, app, geom.area);
     }
     render_status_bar(f, app, status_area);
 
@@ -453,8 +335,6 @@ fn render_center(f: &mut Frame<'_>, app: &mut App, area: Rect) {
 }
 
 fn render_editor(f: &mut Frame<'_>, app: &mut App, area: Rect) {
-    let gutter_width: u16 = 7; // "0000 │ "
-
     let file_display = app
         .editor
         .file_path()
@@ -480,8 +360,15 @@ fn render_editor(f: &mut Frame<'_>, app: &mut App, area: Rect) {
     }
 
     let inner = block.inner(area);
-    let inner_height = inner.height as usize;
-    let text_width = inner.width.saturating_sub(gutter_width).max(1) as usize;
+    f.render_widget(block, area);
+
+    render_editor_lines(f, app, inner);
+}
+
+fn render_editor_lines(f: &mut Frame<'_>, app: &mut App, area: Rect) {
+    let gutter_width: u16 = 7; // "0000 │ "
+    let inner_height = area.height as usize;
+    let text_width = area.width.saturating_sub(gutter_width).max(1) as usize;
 
     app.editor.set_viewport(inner_height, text_width);
 
@@ -540,7 +427,7 @@ fn render_editor(f: &mut Frame<'_>, app: &mut App, area: Rect) {
                 })
                 .collect();
 
-            for (chunk, selected) in split_segment_by_ranges(&padded_segment, &overlaps) {
+            for (chunk, selected) in split_segment_by_ranges(app, &padded_segment, &overlaps) {
                 if chunk.is_empty() {
                     continue;
                 }
@@ -577,31 +464,30 @@ fn render_editor(f: &mut Frame<'_>, app: &mut App, area: Rect) {
 
     while rows.len() < inner_height {
         let gutter_style = Style::default().fg(GUTTER_FG).bg(BG_PANEL);
-        let mut spans = Vec::new();
-        spans.push(Span::styled("     │ ".to_string(), gutter_style));
-        spans.push(Span::styled(
-            " ".repeat(text_width),
-            Style::default().fg(FG_DIM).bg(BG_PANEL),
-        ));
+        let spans = vec![
+            Span::styled("     │ ".to_string(), gutter_style),
+            Span::styled(
+                " ".repeat(text_width),
+                Style::default().fg(FG_DIM).bg(BG_PANEL),
+            ),
+        ];
         rows.push(Line::from(spans));
     }
 
     let paragraph = Paragraph::new(rows)
-        .block(block)
         .wrap(Wrap { trim: false })
         .style(Style::default().bg(BG_PANEL));
 
     f.render_widget(paragraph, area);
 
-    if app.focus == FocusArea::Editor {
-        if let Some(row) = cursor_row {
-            let cursor_y = inner.y + row as u16;
-            let cursor_x = inner.x + gutter_width + cursor_col as u16;
-            if cursor_y < inner.y + inner.height && cursor_x < inner.x + inner.width {
+    if app.focus == FocusArea::Editor
+        && let Some(row) = cursor_row {
+            let cursor_y = area.y + row as u16;
+            let cursor_x = area.x + gutter_width + cursor_col as u16;
+            if cursor_y < area.y + area.height && cursor_x < area.x + area.width {
                 f.set_cursor(cursor_x, cursor_y);
             }
         }
-    }
 }
 
 fn render_terminal(f: &mut Frame<'_>, app: &App, area: Rect) {
@@ -643,47 +529,287 @@ fn render_terminal(f: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_agent(f: &mut Frame<'_>, app: &App, area: Rect) {
-    let items: Vec<ListItem> = app
-        .agent
-        .messages()
-        .iter()
-        .map(|msg| {
-            let lines = vec![
-                Line::from(Span::styled(
-                    msg.title.clone(),
-                    Style::default().fg(Color::White),
-                )),
-                Line::from(Span::styled(
-                    msg.detail.clone(),
-                    Style::default().fg(FG_DIM),
-                )),
-            ];
-            ListItem::new(lines)
-        })
-        .collect();
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(5), Constraint::Length(4)])
+        .split(area);
+    let history_area = sections[0];
+    let input_area = sections[1];
 
-    let mut state = ListState::default();
-    state.select(Some(app.agent.selected_index()));
+    render_agent_history(f, app, history_area);
+    render_agent_input(f, app, input_area);
+}
 
-    let mut block = Block::default()
+fn render_agent_history(f: &mut Frame<'_>, app: &App, area: Rect) {
+    let mut history_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(BORDER_IDLE))
-        .title(Span::styled("代理面板", Style::default().fg(FG_PRIMARY)))
+        .title(Span::styled("代理對話", Style::default().fg(FG_PRIMARY)))
         .style(Style::default().bg(BG_PANEL));
     if app.focus == FocusArea::Agent {
-        block = block.border_style(
+        history_block = history_block.border_style(
             Style::default()
                 .fg(BORDER_FOCUS)
                 .add_modifier(Modifier::BOLD),
         );
     }
 
+    let wrap_width = history_block.inner(area).width.max(1) as usize;
+
+    let items: Vec<ListItem> = app
+        .agent
+        .entries()
+        .iter()
+        .map(|entry| match entry {
+            AgentPanelEntry::UserPrompt { prompt } => {
+                let mut lines = Vec::new();
+                lines.push(Line::from(Span::styled(
+                    "你",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                if prompt.is_empty() {
+                    push_wrapped_line(
+                        &mut lines,
+                        "",
+                        Style::default().fg(Color::White),
+                        wrap_width,
+                    );
+                } else {
+                    for line in prompt.lines() {
+                        push_wrapped_line(
+                            &mut lines,
+                            line,
+                            Style::default().fg(Color::White),
+                            wrap_width,
+                        );
+                    }
+                }
+                ListItem::new(lines)
+            }
+            AgentPanelEntry::Response(msg) => {
+                let mut lines = vec![Line::from(Span::styled(
+                    msg.title.clone(),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ))];
+                if msg.detail.is_empty() {
+                    push_wrapped_line(&mut lines, "", Style::default().fg(FG_DIM), wrap_width);
+                } else {
+                    for line in msg.detail.lines() {
+                        push_wrapped_line(
+                            &mut lines,
+                            line,
+                            Style::default().fg(FG_DIM),
+                            wrap_width,
+                        );
+                    }
+                }
+                if let Some(file) = msg.file.as_ref() {
+                    let line = msg
+                        .line
+                        .map(|l| (l + 1).to_string())
+                        .unwrap_or_else(|| "?".into());
+                    push_wrapped_line(
+                        &mut lines,
+                        &format!("檔案：{} (行 {})", file, line),
+                        Style::default().fg(FG_DIM),
+                        wrap_width,
+                    );
+                }
+                if let Some(patch) = msg.patch.as_ref()
+                    && !patch.trim().is_empty() {
+                        push_wrapped_line(
+                            &mut lines,
+                            "建議變更：",
+                            Style::default().fg(FG_DIM),
+                            wrap_width,
+                        );
+                        for line in patch.lines() {
+                            push_wrapped_line(
+                                &mut lines,
+                                line,
+                                Style::default().fg(Color::Yellow),
+                                wrap_width,
+                            );
+                        }
+                    }
+                ListItem::new(lines)
+            }
+            AgentPanelEntry::Info { title, detail } => {
+                let mut lines = vec![Line::from(Span::styled(
+                    title.clone(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::ITALIC),
+                ))];
+                if detail.is_empty() {
+                    push_wrapped_line(&mut lines, "", Style::default().fg(FG_DIM), wrap_width);
+                } else {
+                    for line in detail.lines() {
+                        push_wrapped_line(
+                            &mut lines,
+                            line,
+                            Style::default().fg(FG_DIM),
+                            wrap_width,
+                        );
+                    }
+                }
+                ListItem::new(lines)
+            }
+            AgentPanelEntry::Error { title, detail } => {
+                let mut lines = vec![Line::from(Span::styled(
+                    title.clone(),
+                    Style::default()
+                        .fg(Color::LightRed)
+                        .add_modifier(Modifier::BOLD),
+                ))];
+                if detail.is_empty() {
+                    push_wrapped_line(
+                        &mut lines,
+                        "",
+                        Style::default().fg(Color::LightRed),
+                        wrap_width,
+                    );
+                } else {
+                    for line in detail.lines() {
+                        push_wrapped_line(
+                            &mut lines,
+                            line,
+                            Style::default().fg(Color::LightRed),
+                            wrap_width,
+                        );
+                    }
+                }
+                ListItem::new(lines)
+            }
+            AgentPanelEntry::ToolOutput { tool, detail } => {
+                let mut lines = vec![Line::from(Span::styled(
+                    format!("工具：{}", tool),
+                    Style::default().fg(Color::Green),
+                ))];
+                if detail.is_empty() {
+                    push_wrapped_line(&mut lines, "", Style::default().fg(FG_DIM), wrap_width);
+                } else {
+                    for line in detail.lines() {
+                        push_wrapped_line(
+                            &mut lines,
+                            line,
+                            Style::default().fg(FG_DIM),
+                            wrap_width,
+                        );
+                    }
+                }
+                ListItem::new(lines)
+            }
+        })
+        .collect();
+
+    let mut state = ListState::default();
+    state.select(Some(app.agent.selected_index()));
+
     let list = List::new(items)
-        .block(block)
+        .block(history_block)
         .style(Style::default().bg(BG_PANEL))
-        .highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG).fg(Color::White));
+        .highlight_style(
+            Style::default()
+                .bg(EDITOR_HOVER_BG)
+                .fg(EDITOR_LINE_HIGHLIGHT_FG)
+                .add_modifier(Modifier::BOLD),
+        );
 
     f.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_agent_input(f: &mut Frame<'_>, app: &App, area: Rect) {
+    let mut input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(BORDER_IDLE))
+        .title(Span::styled(
+            "輸入訊息 (Enter 傳送 / Shift+Enter 換行)",
+            Style::default().fg(FG_PRIMARY),
+        ))
+        .style(Style::default().bg(BG_PANEL));
+
+    if app.focus == FocusArea::Agent {
+        input_block = input_block.border_style(
+            Style::default()
+                .fg(BORDER_FOCUS)
+                .add_modifier(Modifier::BOLD),
+        );
+    }
+
+    let input_inner = input_block.inner(area);
+    let input_lines: Vec<Line> = if app.agent_input.is_empty() {
+        vec![Line::from(Span::styled(
+            "輸入指令或提問給代理…",
+            Style::default().fg(FG_DIM),
+        ))]
+    } else {
+        app.agent_input
+            .buffer()
+            .lines()
+            .map(|line| {
+                Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(FG_PRIMARY),
+                ))
+            })
+            .collect()
+    };
+
+    let input_paragraph = Paragraph::new(input_lines)
+        .block(input_block)
+        .style(Style::default().bg(BG_PANEL))
+        .wrap(Wrap { trim: false })
+        .alignment(Alignment::Left);
+
+    f.render_widget(Clear, area);
+    f.render_widget(input_paragraph, area);
+
+    if app.focus == FocusArea::Agent {
+        let width = input_inner.width.max(1) as usize;
+        let (cursor_col, cursor_row) = app.agent_input.cursor_display_position(width);
+        let cursor_x = input_inner
+            .x
+            .saturating_add(cursor_col.min(width.saturating_sub(1) as u16));
+        let cursor_y = input_inner
+            .y
+            .saturating_add(cursor_row.min(input_inner.height.saturating_sub(1)));
+        f.set_cursor(cursor_x, cursor_y);
+    }
+}
+
+fn push_wrapped_line(lines: &mut Vec<Line>, text: &str, style: Style, width: usize) {
+    for segment in wrap_to_width(text, width) {
+        lines.push(Line::from(Span::styled(segment, style)));
+    }
+}
+
+fn wrap_to_width(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    for ch in text.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1).max(1);
+        if current_width + ch_width > width && !current.is_empty() {
+            result.push(current);
+            current = String::new();
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += ch_width;
+    }
+    result.push(current);
+    result
 }
 
 fn render_status_bar(f: &mut Frame<'_>, app: &mut App, area: Rect) {
@@ -773,10 +899,15 @@ fn render_overlay(f: &mut Frame<'_>, app: &App, overlay: &OverlayState) {
         OverlayState::CommandPalette(state) => render_command_palette_overlay(f, state),
         OverlayState::InputPrompt(state) => render_input_prompt_overlay(f, app, state),
         OverlayState::ConfirmDelete(state) => render_confirm_delete_overlay(f, state),
+        OverlayState::AgentSwitcher(state) => render_agent_switcher_overlay(f, state),
     }
 }
 
-fn split_segment_by_ranges(segment: &str, overlaps: &[(usize, usize)]) -> Vec<(String, bool)> {
+fn split_segment_by_ranges(
+    app: &App,
+    segment: &str,
+    overlaps: &[(usize, usize)],
+) -> Vec<(String, bool)> {
     let mut result: Vec<(String, bool)> = Vec::new();
     let mut overlap_iter = overlaps.iter().peekable();
     let mut display_pos = 0;
@@ -804,7 +935,7 @@ fn split_segment_by_ranges(segment: &str, overlaps: &[(usize, usize)]) -> Vec<(S
         }
 
         current.push(ch);
-        display_pos += Editor::display_width(ch);
+        display_pos += app.editor.display_width(ch);
     }
 
     if !current.is_empty() {
@@ -982,6 +1113,74 @@ fn render_input_prompt_overlay(f: &mut Frame<'_>, app: &App, state: &InputPrompt
             Paragraph::new("Enter 確認 · Esc 取消").style(Style::default().fg(FG_DIM).bg(MENU_BG));
         f.render_widget(hint, message_area);
     }
+}
+
+fn render_agent_switcher_overlay(f: &mut Frame<'_>, state: &AgentSwitcherState) {
+    let area = centered_rect(50, 60, f.size());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .title(Span::styled(
+            "選擇代理",
+            Style::default().fg(BAR_TEXT).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(MENU_BORDER))
+        .style(Style::default().bg(MENU_BG));
+    f.render_widget(block.clone(), area);
+    let inner = block.inner(area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(inner);
+
+    let items: Vec<ListItem> = if state.profiles.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "沒有可用設定",
+            Style::default().fg(FG_DIM),
+        )))]
+    } else {
+        state
+            .profiles
+            .iter()
+            .map(|profile| {
+                let mut lines = vec![Line::from(Span::styled(
+                    profile.label.clone(),
+                    Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD),
+                ))];
+                if let Some(detail) = profile.description.as_ref() {
+                    lines.push(Line::from(Span::styled(
+                        detail.clone(),
+                        Style::default().fg(FG_DIM),
+                    )));
+                }
+                ListItem::new(lines)
+            })
+            .collect()
+    };
+
+    let mut list_state = ListState::default();
+    if !state.profiles.is_empty() {
+        list_state.select(Some(state.selected.min(state.profiles.len() - 1)));
+    }
+
+    let list = List::new(items)
+        .style(Style::default().bg(MENU_BG))
+        .highlight_style(
+            Style::default()
+                .bg(MENU_HIGHLIGHT_BG)
+                .fg(MENU_HIGHLIGHT_TEXT),
+        );
+
+    f.render_stateful_widget(list, chunks[0], &mut list_state);
+
+    let instructions = Paragraph::new(Line::from(vec![Span::styled(
+        "上/下鍵選擇，Enter 套用，Esc 取消",
+        Style::default().fg(FG_DIM),
+    )]))
+    .style(Style::default().bg(MENU_BG))
+    .alignment(Alignment::Center);
+    f.render_widget(instructions, chunks[1]);
 }
 
 fn render_confirm_delete_overlay(f: &mut Frame<'_>, state: &ConfirmDeleteState) {

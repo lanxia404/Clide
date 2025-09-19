@@ -57,29 +57,16 @@ impl FileTree {
         entries: &mut Vec<FileEntry>,
         has_content: &mut bool,
     ) {
-        let mut children = match fs::read_dir(dir) {
-            Ok(read_dir) => read_dir.filter_map(|res| res.ok()).collect::<Vec<_>>(),
+        let children = match Self::read_and_sort_directory(dir, self.show_hidden) {
+            Ok(children) => children,
             Err(_) => return,
         };
-
-        children.sort_by(|a, b| {
-            let a_is_dir = a.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-            let b_is_dir = b.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-            match b_is_dir.cmp(&a_is_dir) {
-                std::cmp::Ordering::Equal => a.file_name().cmp(&b.file_name()),
-                other => other,
-            }
-        });
 
         for child in children {
             let name = match child.file_name().to_str() {
                 Some(name) => name.to_string(),
                 None => continue,
             };
-
-            if !self.show_hidden && name.starts_with('.') {
-                continue;
-            }
 
             let path = self.canonicalize(&child.path());
             let is_dir = child.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
@@ -110,6 +97,37 @@ impl FileTree {
                 *has_content = true;
             }
         }
+    }
+
+    /// Reads, filters, and sorts the entries of a directory.
+    fn read_and_sort_directory(
+        dir: &Path,
+        show_hidden: bool,
+    ) -> std::io::Result<Vec<fs::DirEntry>> {
+        let mut children: Vec<fs::DirEntry> = fs::read_dir(dir)?
+            .filter_map(|res| res.ok())
+            .filter(|entry| {
+                if show_hidden {
+                    return true;
+                }
+                if let Some(name) = entry.file_name().to_str() {
+                    !name.starts_with('.')
+                } else {
+                    false
+                }
+            })
+            .collect();
+
+        children.sort_by(|a, b| {
+            let a_is_dir = a.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+            let b_is_dir = b.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+            match b_is_dir.cmp(&a_is_dir) {
+                std::cmp::Ordering::Equal => a.file_name().cmp(&b.file_name()),
+                other => other,
+            }
+        });
+
+        Ok(children)
     }
 
     pub fn refresh(&mut self) {
@@ -163,11 +181,10 @@ impl FileTree {
             });
         }
 
-        if let Some(path) = previously_selected {
-            if let Some(idx) = entries.iter().position(|entry| entry.path == path) {
+        if let Some(path) = previously_selected
+            && let Some(idx) = entries.iter().position(|entry| entry.path == path) {
                 self.selected = idx;
             }
-        }
 
         self.entries = entries;
         self.selected = self.selected.min(self.entries.len().saturating_sub(1));
@@ -261,19 +278,6 @@ impl FileTree {
         self.show_hidden
     }
 
-    pub fn toggle_selected_directory(&mut self) {
-        if let Some(entry) = self.selected_entry().cloned() {
-            if entry.kind == FileEntryKind::Directory && entry.has_children {
-                if entry.expanded {
-                    self.expanded_dirs.remove(&entry.path);
-                } else {
-                    self.expanded_dirs.insert(entry.path.clone());
-                }
-                self.refresh();
-            }
-        }
-    }
-
     pub fn activate_selected(&mut self) -> FileTreeAction {
         if let Some(entry) = self.selected_entry().cloned() {
             match entry.kind {
@@ -293,7 +297,7 @@ impl FileTree {
         FileTreeAction::None
     }
 
-    fn navigate_to(&mut self, path: &PathBuf) -> bool {
+    fn navigate_to(&mut self, path: &Path) -> bool {
         let target = self.canonicalize(path);
         if target == self.current_dir {
             return false;
