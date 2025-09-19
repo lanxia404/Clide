@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct TreeNode {
     pub path: PathBuf,
+    pub display_name: Option<String>,
     pub is_directory: bool,
     pub children: Vec<TreeNode>,
     pub is_expanded: bool,
@@ -14,6 +15,7 @@ impl TreeNode {
     fn new(path: PathBuf, is_directory: bool) -> Self {
         Self {
             path,
+            display_name: None,
             is_directory,
             children: Vec::new(),
             is_expanded: false,
@@ -29,13 +31,16 @@ pub struct FileTree {
 
 impl FileTree {
     pub fn new(root_path: &Path) -> Result<Self, std::io::Error> {
-        let mut root_node = TreeNode::new(root_path.to_path_buf(), true);
-        root_node.children = Self::scan_directory(root_path)?;
+        // Canonicalize the path to get a clean, absolute path. This is crucial for stability.
+        let absolute_path = fs::canonicalize(root_path)?;
+
+        let mut root_node = TreeNode::new(absolute_path.clone(), true);
+        root_node.children = Self::scan_directory(&absolute_path)?;
         
-        // Only add ".." to the root of the tree
-        if let Some(parent) = root_path.parent() {
+        // Only add ".." to the root of the tree if it's not the filesystem root
+        if let Some(parent) = absolute_path.parent() {
             let mut parent_node = TreeNode::new(parent.to_path_buf(), true);
-            parent_node.path = parent.join("..");
+            parent_node.display_name = Some("..".to_string());
             root_node.children.insert(0, parent_node);
         }
 
@@ -139,56 +144,60 @@ impl FileTree {
         }
     }
 
-    // Navigation logic (select_next, select_previous) remains complex but should be okay
-    // ... (select_next and select_previous functions are unchanged)
-    pub fn select_next(&mut self) {
-        let mut current_node = &self.root;
-        for &index in &self.selected {
-            current_node = &current_node.children[index];
+    pub fn scroll_up(&mut self) {
+        self.select_previous();
+    }
+
+    pub fn scroll_down(&mut self) {
+        self.select_next();
+    }
+
+    // --- New, clearer navigation logic ---
+
+    fn get_visible_nodes(&self) -> Vec<Vec<usize>> {
+        let mut nodes = Vec::new();
+        fn traverse(node: &TreeNode, path: Vec<usize>, nodes: &mut Vec<Vec<usize>>) {
+            if !path.is_empty() { // Don't include the root node itself
+                nodes.push(path.clone());
+            }
+            if node.is_expanded {
+                for (i, child) in node.children.iter().enumerate() {
+                    let mut child_path = path.clone();
+                    child_path.push(i);
+                    traverse(child, child_path, nodes);
+                }
+            }
         }
+        traverse(&self.root, Vec::new(), &mut nodes);
+        nodes
+    }
 
-        if current_node.is_expanded && !current_node.children.is_empty() {
-            self.selected.push(0);
-        } else {
-            while !self.selected.is_empty() {
-                let last_index = self.selected.last().unwrap().clone();
-                
-                let mut parent_node = &self.root;
-                for &index in &self.selected[..self.selected.len() - 1] {
-                    parent_node = &parent_node.children[index];
-                }
-
-                if last_index + 1 < parent_node.children.len() {
-                    *self.selected.last_mut().unwrap() += 1;
-                    return;
-                } else {
-                    self.selected.pop();
-                }
+    pub fn select_next(&mut self) {
+        let visible_nodes = self.get_visible_nodes();
+        if let Some(current_index) = visible_nodes.iter().position(|path| path == &self.selected) {
+            if current_index + 1 < visible_nodes.len() {
+                self.selected = visible_nodes[current_index + 1].clone();
             }
-            if self.selected.is_empty() {
-                self.selected.push(0);
-            }
+        } else if !visible_nodes.is_empty() {
+             self.selected = visible_nodes[0].clone();
         }
     }
 
     pub fn select_previous(&mut self) {
-        if let Some(last_index) = self.selected.last_mut() {
-            if *last_index > 0 {
-                *last_index -= 1;
-                let mut current_node = &self.root;
-                for &index in &self.selected {
-                    current_node = &current_node.children[index];
-                }
-                while current_node.is_expanded && !current_node.children.is_empty() {
-                    let last_child_index = current_node.children.len() - 1;
-                    self.selected.push(last_child_index);
-                    current_node = &current_node.children[last_child_index];
-                }
-            } else {
-                if self.selected.len() > 1 {
-                    self.selected.pop();
-                }
+        let visible_nodes = self.get_visible_nodes();
+        if let Some(current_index) = visible_nodes.iter().position(|path| path == &self.selected) {
+            if current_index > 0 {
+                self.selected = visible_nodes[current_index - 1].clone();
             }
+        } else if !visible_nodes.is_empty() {
+             self.selected = visible_nodes[0].clone();
+        }
+    }
+
+    pub fn select_by_index(&mut self, index: usize) {
+        let visible_nodes = self.get_visible_nodes();
+        if index < visible_nodes.len() {
+            self.selected = visible_nodes[index].clone();
         }
     }
 }
