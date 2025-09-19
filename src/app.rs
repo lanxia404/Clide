@@ -2,14 +2,17 @@ use crate::editor::Editor;
 use crate::event::Event;
 use crate::file_tree::FileTree;
 use crate::i18n::{English, SimplifiedChinese, TraditionalChinese, Language};
-use crate::lsp::LspClient;
+use crate::lsp::{LspClient, LspMessage};
 use crate::syntax::SyntaxHighlighter;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind, MouseButton};
+use lsp_types::{Diagnostic, Uri};
 use ratatui::layout::Rect;
+use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 // ... (CurrentLanguage and IconSet enums are unchanged)
 pub enum IconSet {
@@ -46,24 +49,22 @@ pub struct App {
     pub file_tree: FileTree,
     pub editor: Editor,
     pub syntax_highlighter: SyntaxHighlighter,
-    pub lsp_client: Option<LspClient>,
+    pub lsp_client: LspClient,
+    pub lsp_receiver: UnboundedReceiver<LspMessage>,
+    pub diagnostics: HashMap<Uri, Vec<Diagnostic>>,
     pub icon_set: IconSet,
     pub focus: Focus,
-    // UI areas
     pub file_tree_area: Rect,
     pub editor_area: Rect,
-    // For double click detection
     last_click: Option<(Instant, MouseEvent)>,
 }
 
 impl App {
     pub fn new() -> Result<Self> {
         let initial_path = Path::new(".");
-        let file_tree = FileTree::new(initial_path)?;
-        let lsp_client = LspClient::new().ok();
-        if let Some(client) = &lsp_client {
-            client.initialize(initial_path)?;
-        }
+        
+        let (lsp_client, lsp_receiver) = LspClient::new()?;
+        lsp_client.initialize(initial_path)?;
 
         let icon_set = match env::var("CLIDE_ICONS") {
             Ok(val) if val.to_lowercase() == "nerd" => IconSet::NerdFont,
@@ -74,10 +75,12 @@ impl App {
             running: true,
             lang_state: CurrentLanguage::TraditionalChinese,
             lang: Box::new(TraditionalChinese),
-            file_tree,
+            file_tree: FileTree::new(initial_path)?,
             editor: Editor::new(),
             syntax_highlighter: SyntaxHighlighter::new(),
             lsp_client,
+            lsp_receiver,
+            diagnostics: HashMap::new(),
             icon_set,
             focus: Focus::FileTree,
             file_tree_area: Rect::default(),
@@ -86,6 +89,7 @@ impl App {
         })
     }
 
+    // ... (rest of App impl is unchanged for now)
     pub fn tick(&mut self) {}
 
     pub fn handle_event(&mut self, event: Event) {
@@ -97,7 +101,6 @@ impl App {
     }
 
     fn handle_mouse_event(&mut self, event: MouseEvent) {
-        // Double click logic
         let is_double_click = if let Some((last_time, last_event)) = self.last_click {
             let now = Instant::now();
             now.duration_since(last_time) < Duration::from_millis(300) &&
@@ -109,7 +112,7 @@ impl App {
         if event.kind == MouseEventKind::Down(MouseButton::Left) {
             if is_double_click {
                 self.handle_double_click(event);
-                self.last_click = None; // Reset after double click
+                self.last_click = None;
             } else {
                 self.last_click = Some((Instant::now(), event));
             }
@@ -137,7 +140,6 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        // Global keybindings
         if key_event.code == KeyCode::Tab {
             self.toggle_focus();
             return;
@@ -172,8 +174,6 @@ impl App {
             KeyCode::Right => self.editor.move_cursor_right(),
             _ => {}
         }
-        // After any potential movement, ensure the viewport is scrolled correctly.
-        // The inner area height is the editor_area height minus 2 for the borders.
         let view_height = self.editor_area.height.saturating_sub(2);
         self.editor.scroll(view_height as usize);
     }
@@ -201,9 +201,7 @@ impl App {
 
     fn open_file(&mut self, path: PathBuf) {
         if self.editor.open_file(path.clone()).is_ok() {
-            if let Some(client) = &self.lsp_client {
-                client.did_open(&path).unwrap_or(());
-            }
+            self.lsp_client.did_open(&path).unwrap_or(());
             self.focus = Focus::Editor;
         }
     }

@@ -1,32 +1,22 @@
 use anyhow::Result;
-use lsp_types::notification::{Notification, DidOpenTextDocument, PublishDiagnostics};
-use lsp_types::request::{Initialize, Request};
 use lsp_types::{
-    ClientCapabilities,
-    DidOpenTextDocumentParams,
-    InitializeParams,
-    PublishDiagnosticsParams,
-    TextDocumentItem,
-    Uri,
-    WorkspaceFolder,
+    notification::{Notification, DidOpenTextDocument, PublishDiagnostics},
+    request::{Initialize, Request},
+    ClientCapabilities, DidOpenTextDocumentParams, InitializeParams, PublishDiagnosticsParams,
+    TextDocumentItem, Uri, WorkspaceFolder,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::str::FromStr;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader},
+    process::{Child, ChildStdin, Command},
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+};
 
-#[derive(Debug, Serialize, Deserialize)]
-struct LspResponse {
-    id: u64,
-    result: Value,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct LspNotification {
     method: String,
     params: Value,
@@ -35,35 +25,24 @@ struct LspNotification {
 #[derive(Debug)]
 pub enum LspMessage {
     Notification(String, Value),
-    // We can add Responses here later if needed
 }
 
 pub struct LspClient {
     #[allow(dead_code)]
     server: Child,
     writer: UnboundedSender<Value>,
-    pub message_receiver: UnboundedReceiver<LspMessage>,
 }
 
-// ... (create_lsp_request and create_lsp_notification are unchanged)
 fn create_lsp_request<R: Request>(id: u64, params: R::Params) -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": R::METHOD,
-        "params": params,
-    })
+    json!({ "jsonrpc": "2.0", "id": id, "method": R::METHOD, "params": params })
 }
+
 fn create_lsp_notification<N: Notification>(params: N::Params) -> Value {
-     json!({
-        "jsonrpc": "2.0",
-        "method": N::METHOD,
-        "params": params,
-    })
+    json!({ "jsonrpc": "2.0", "method": N::METHOD, "params": params })
 }
 
 impl LspClient {
-    pub fn new() -> Result<(Self, UnboundedSender<Value>)> {
+    pub fn new() -> Result<(Self, UnboundedReceiver<LspMessage>)> {
         let (msg_tx, msg_rx) = mpsc::unbounded_channel();
         let (writer_tx, writer_rx) = mpsc::unbounded_channel();
 
@@ -79,22 +58,22 @@ impl LspClient {
 
         tokio::spawn(Self::writer_task(stdin, writer_rx));
         tokio::spawn(Self::reader_task(stdout, msg_tx.clone()));
-        tokio::spawn(Self::reader_task(stderr, msg_tx));
+        // Also consume stderr to prevent it from blocking, but we don't need to parse it
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr);
+            let mut buffer = Vec::new();
+            while let Ok(_) = reader.read_to_end(&mut buffer).await {}
+        });
 
-        let client = Self {
-            server,
-            writer: writer_tx.clone(),
-            message_receiver: msg_rx,
-        };
+        let client = Self { server, writer: writer_tx };
 
-        Ok((client, writer_tx))
+        Ok((client, msg_rx))
     }
 
     async fn writer_task(mut stdin: ChildStdin, mut rx: UnboundedReceiver<Value>) {
-        // ... (writer_task is unchanged)
         while let Some(msg) = rx.recv().await {
             let msg_str = msg.to_string();
-            let content = format!("Content-Length: {{}}\r\n\r\n{{}}", msg_str.len(), msg_str);
+            let content = format!("Content-Length: {}\r\n\r\n{}", msg_str.len(), msg_str);
             if stdin.write_all(content.as_bytes()).await.is_err() {
                 break;
             }
@@ -119,11 +98,8 @@ impl LspClient {
                     if let Some(length) = content_length {
                         let mut body_buffer = vec![0; length];
                         if reader.read_exact(&mut body_buffer).await.is_ok() {
-                            if let Ok(json) = serde_json::from_slice::<Value>(&body_buffer) {
-                                if let Ok(notification) = serde_json::from_value::<LspNotification>(json.clone()) {
-                                    let _ = msg_tx.send(LspMessage::Notification(notification.method, notification.params));
-                                }
-                                // We could parse Responses here too
+                            if let Ok(notification) = serde_json::from_slice::<LspNotification>(&body_buffer) {
+                                let _ = msg_tx.send(LspMessage::Notification(notification.method, notification.params));
                             }
                         }
                         content_length = None;
@@ -136,8 +112,7 @@ impl LspClient {
     }
 
     pub fn initialize(&self, root_path: &Path) -> Result<()> {
-        // ... (initialize is unchanged)
-        let uri_string = format!("file://{{}}", root_path.to_string_lossy());
+        let uri_string = format!("file://{}", root_path.to_string_lossy());
         let root_uri = Uri::from_str(&uri_string)
             .map_err(|_| anyhow::anyhow!("Failed to create root URI"))?;
         let workspace_folder = WorkspaceFolder {
@@ -156,8 +131,7 @@ impl LspClient {
     }
 
     pub fn did_open(&self, path: &Path) -> Result<()> {
-        // ... (did_open is unchanged)
-        let uri_string = format!("file://{{}}", path.to_string_lossy());
+        let uri_string = format!("file://{}", path.to_string_lossy());
         let uri = Uri::from_str(&uri_string)
             .map_err(|_| anyhow::anyhow!("Failed to create file URI"))?;
         let text = std::fs::read_to_string(path)?;
