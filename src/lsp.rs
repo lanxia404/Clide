@@ -2,19 +2,20 @@ use anyhow::Result;
 use lsp_types::notification::{Notification, DidOpenTextDocument};
 use lsp_types::request::{Initialize, Request};
 use lsp_types::{
-    ClientCapabilities, DidOpenTextDocumentParams, InitializeParams,
-    TextDocumentItem,
-    Uri,
+    ClientCapabilities, DidOpenTextDocumentParams, InitializeParams, TextDocumentItem,
+    WorkspaceFolder, Uri,
 };
 use serde_json::{json, Value};
+use std::io::Write;
 use std::path::Path;
 use std::process::Stdio;
 use std::str::FromStr;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 pub struct LspClient {
+    #[allow(dead_code)]
     server: Child,
     writer: UnboundedSender<Value>,
 }
@@ -41,15 +42,18 @@ impl LspClient {
         let mut server = Command::new("rust-analyzer")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()?;
 
         let stdin = server.stdin.take().unwrap();
         let stdout = server.stdout.take().unwrap();
+        let stderr = server.stderr.take().unwrap();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
         tokio::spawn(Self::writer_task(stdin, rx));
         tokio::spawn(Self::reader_task(stdout));
+        tokio::spawn(Self::reader_task(stderr));
 
         Ok(Self { server, writer: tx })
     }
@@ -64,11 +68,41 @@ impl LspClient {
         }
     }
 
-    async fn reader_task(stdout: ChildStdout) {
-        let mut reader = BufReader::new(stdout);
+    async fn reader_task<T: AsyncRead + Unpin>(stream: T) {
+        let mut reader = BufReader::new(stream);
+        let mut buffer = String::new();
+        let mut content_length: Option<usize> = None;
+
+        let log_path = std::env::temp_dir().join("clide-debug.log");
+        let mut log_file = std::fs::File::create(log_path).ok();
+
         loop {
-            let mut line = String::new();
-            if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+            buffer.clear();
+            if let Ok(bytes_read) = reader.read_line(&mut buffer).await {
+                if bytes_read == 0 { break; }
+
+                if buffer.starts_with("Content-Length:") {
+                    if let Some(len_str) = buffer.trim().split(':').nth(1) {
+                        content_length = len_str.trim().parse::<usize>().ok();
+                    }
+                }
+                
+                if buffer.trim().is_empty() {
+                    if let Some(length) = content_length {
+                        let mut body_buffer = vec![0; length];
+                        if reader.read_exact(&mut body_buffer).await.is_ok() {
+                            if let Ok(json_str) = String::from_utf8(body_buffer) {
+                                if let Ok(json) = serde_json::from_str::<Value>(&json_str) {
+                                    if let Some(file) = log_file.as_mut() {
+                                        let _ = writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap());
+                                    }
+                                }
+                            }
+                        }
+                        content_length = None;
+                    }
+                }
+            } else {
                 break;
             }
         }
@@ -78,9 +112,15 @@ impl LspClient {
         let uri_string = format!("file://{}", root_path.to_string_lossy());
         let root_uri = Uri::from_str(&uri_string)
             .map_err(|_| anyhow::anyhow!("Failed to create root URI"))?;
+        
+        let workspace_folder = WorkspaceFolder {
+            uri: root_uri,
+            name: root_path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+        };
+
         let params = InitializeParams {
             process_id: Some(std::process::id()),
-            root_uri: Some(root_uri),
+            workspace_folders: Some(vec![workspace_folder]),
             capabilities: ClientCapabilities::default(),
             ..Default::default()
         };

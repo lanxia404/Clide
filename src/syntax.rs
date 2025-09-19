@@ -1,8 +1,6 @@
 
-use syntect::easy::HighlightLines;
 use syntect::parsing::SyntaxSet;
-use syntect::highlighting::{ThemeSet, Style};
-use syntect::util::{as_24_bit_terminal_escaped, LinesWithEndings};
+use syntect::highlighting::ThemeSet;
 
 pub struct SyntaxHighlighter {
     pub syntax_set: SyntaxSet,

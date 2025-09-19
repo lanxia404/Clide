@@ -1,42 +1,71 @@
 pub trait Language {
-    fn file_tree_title(&self) -> &'static str;
+    // Titles
     fn editor_title(&self) -> &'static str;
-    fn instructions_title(&self) -> &'static str;
-    fn quit_instruction(&self) -> &'static str;
-    fn counter_instruction(&self) -> &'static str;
-    fn lang_toggle_instruction(&self) -> &'static str;
-    fn counter_title(&self) -> &'static str;
+    fn file_tree_title(&self) -> &'static str;
+
+    // Header
+    fn header_file(&self) -> &'static str;
+    fn header_edit(&self) -> &'static str;
+    fn header_view(&self) -> &'static str;
+    fn header_go(&self) -> &'static str;
+    fn header_run(&self) -> &'static str;
+    fn header_terminal(&self) -> &'static str;
+    fn header_help(&self) -> &'static str;
+
+    // Footer
+    fn footer_no_file(&self) -> &'static str;
+    fn footer_line(&self) -> &'static str;
+    fn footer_col(&self) -> &'static str;
+    fn footer_lang_toggle(&self) -> &'static str;
 }
 
 pub struct English;
 impl Language for English {
-    fn file_tree_title(&self) -> &'static str { "File Tree" }
     fn editor_title(&self) -> &'static str { "Editor" }
-    fn instructions_title(&self) -> &'static str { "Instructions" }
-    fn quit_instruction(&self) -> &'static str { "Press 'q' to quit." }
-    fn counter_instruction(&self) -> &'static str { "Press '←'/'→' to change counter." }
-    fn lang_toggle_instruction(&self) -> &'static str { "Press 'l' to switch language." }
-    fn counter_title(&self) -> &'static str { "Counter" }
+    fn file_tree_title(&self) -> &'static str { " Explorer " }
+    fn header_file(&self) -> &'static str { "File" }
+    fn header_edit(&self) -> &'static str { "Edit" }
+    fn header_view(&self) -> &'static str { "View" }
+    fn header_go(&self) -> &'static str { "Go" }
+    fn header_run(&self) -> &'static str { "Run" }
+    fn header_terminal(&self) -> &'static str { "Terminal" }
+    fn header_help(&self) -> &'static str { "Help" }
+    fn footer_no_file(&self) -> &'static str { "[No Name]" }
+    fn footer_line(&self) -> &'static str { "Ln" }
+    fn footer_col(&self) -> &'static str { "Col" }
+    fn footer_lang_toggle(&self) -> &'static str { "Press 'l' to switch language" }
 }
 
 pub struct SimplifiedChinese;
 impl Language for SimplifiedChinese {
-    fn file_tree_title(&self) -> &'static str { "文件树" }
     fn editor_title(&self) -> &'static str { "编辑器" }
-    fn instructions_title(&self) -> &'static str { "操作说明" }
-    fn quit_instruction(&self) -> &'static str { "按 'q' 退出。" }
-    fn counter_instruction(&self) -> &'static str { "按 '←'/'→' 改变计数器。" }
-    fn lang_toggle_instruction(&self) -> &'static str { "按 'l' 切换语言。" }
-    fn counter_title(&self) -> &'static str { "计数器" }
+    fn file_tree_title(&self) -> &'static str { " 文件浏览器 " }
+    fn header_file(&self) -> &'static str { "文件" }
+    fn header_edit(&self) -> &'static str { "编辑" }
+    fn header_view(&self) -> &'static str { "视图" }
+    fn header_go(&self) -> &'static str { "转到" }
+    fn header_run(&self) -> &'static str { "运行" }
+    fn header_terminal(&self) -> &'static str { "终端" }
+    fn header_help(&self) -> &'static str { "帮助" }
+    fn footer_no_file(&self) -> &'static str { "[无名称]" }
+    fn footer_line(&self) -> &'static str { "行" }
+    fn footer_col(&self) -> &'static str { "列" }
+    fn footer_lang_toggle(&self) -> &'static str { "按 'l' 切换语言" }
 }
 
 pub struct TraditionalChinese;
 impl Language for TraditionalChinese {
-    fn file_tree_title(&self) -> &'static str { "檔案總管" }
     fn editor_title(&self) -> &'static str { "編輯器" }
-    fn instructions_title(&self) -> &'static str { "操作說明" }
-    fn quit_instruction(&self) -> &'static str { "按 'q' 退出。" }
-    fn counter_instruction(&self) -> &'static str { "按 '←'/'→' 變更計數器。" }
-    fn lang_toggle_instruction(&self) -> &'static str { "按 'l' 切換語言。" }
-    fn counter_title(&self) -> &'static str { "計數器" }
+    fn file_tree_title(&self) -> &'static str { " 檔案總管 " }
+    fn header_file(&self) -> &'static str { "檔案" }
+    fn header_edit(&self) -> &'static str { "編輯" }
+    fn header_view(&self) -> &'static str { "檢視" }
+    fn header_go(&self) -> &'static str { "前往" }
+    fn header_run(&self) -> &'static str { "執行" }
+    fn header_terminal(&self) -> &'static str { "終端機" }
+    fn header_help(&self) -> &'static str { "說明" }
+    fn footer_no_file(&self) -> &'static str { "[未命名]" }
+    fn footer_line(&self) -> &'static str { "行" }
+    fn footer_col(&self) -> &'static str { "列" }
+    fn footer_lang_toggle(&self) -> &'static str { "按 'l' 切換語言" }
 }

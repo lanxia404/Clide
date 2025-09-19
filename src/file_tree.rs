@@ -1,3 +1,4 @@
+use crossterm::event::{KeyEvent, KeyCode, MouseEvent, MouseEventKind};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -30,6 +31,14 @@ impl FileTree {
     pub fn new(root_path: &Path) -> Result<Self, std::io::Error> {
         let mut root_node = TreeNode::new(root_path.to_path_buf(), true);
         root_node.children = Self::scan_directory(root_path)?;
+        
+        // Only add ".." to the root of the tree
+        if let Some(parent) = root_path.parent() {
+            let mut parent_node = TreeNode::new(parent.to_path_buf(), true);
+            parent_node.path = parent.join("..");
+            root_node.children.insert(0, parent_node);
+        }
+
         root_node.is_expanded = true;
         Ok(Self {
             root: root_node,
@@ -52,7 +61,16 @@ impl FileTree {
 
     pub fn get_selected_node_mut(&mut self) -> &mut TreeNode {
         let mut node = &mut self.root;
+        // The selection path is relative to the visible children, so we need to be careful
+        if self.selected.is_empty() {
+            // This case should ideally not happen if selection is always valid
+            return node;
+        }
         for &index in &self.selected {
+            if index >= node.children.len() {
+                // Selection is out of bounds, return the current node to avoid panic
+                return node;
+            }
             node = &mut node.children[index];
         }
         node
@@ -60,29 +78,41 @@ impl FileTree {
 
     pub fn get_selected_path(&self) -> PathBuf {
         let mut node = &self.root;
+        if self.selected.is_empty() {
+            return node.path.clone();
+        }
         for &index in &self.selected {
+             if index >= node.children.len() {
+                return node.path.clone(); // Out of bounds
+            }
             node = &node.children[index];
         }
         node.path.clone()
     }
 
-    pub fn handle_key_event(&mut self, key_event: crossterm::event::KeyEvent) {
-        match key_event.code {
-            crossterm::event::KeyCode::Up => self.select_previous(),
-            crossterm::event::KeyCode::Down => self.select_next(),
-            crossterm::event::KeyCode::Left | crossterm::event::KeyCode::Right => self.toggle_expansion(),
+    pub fn handle_mouse_event(&mut self, event: MouseEvent) {
+        match event.kind {
+            MouseEventKind::ScrollUp => self.select_previous(),
+            MouseEventKind::ScrollDown => self.select_next(),
+            // Double click logic will be in app.rs
             _ => {}
         }
     }
 
-    pub fn toggle_expansion(&mut self) {
-        let node = self.get_selected_node_mut();
-        if !node.is_directory {
-            return;
+    pub fn handle_key_event(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Up => self.select_previous(),
+            KeyCode::Down => self.select_next(),
+            KeyCode::Left => self.collapse_selected(),
+            KeyCode::Right => self.expand_selected(),
+            _ => {}
         }
-        if node.is_expanded {
-            node.is_expanded = false;
-        } else {
+    }
+
+    pub fn expand_selected(&mut self) {
+        let node = self.get_selected_node_mut();
+        if !node.is_directory { return; }
+        if !node.is_expanded {
             if node.children.is_empty() {
                 if let Ok(children) = Self::scan_directory(&node.path) {
                     node.children = children;
@@ -92,6 +122,25 @@ impl FileTree {
         }
     }
 
+    pub fn collapse_selected(&mut self) {
+        let node = self.get_selected_node_mut();
+        if node.is_directory && node.is_expanded {
+            node.is_expanded = false;
+        }
+    }
+    
+    pub fn toggle_expansion(&mut self) {
+        let node = self.get_selected_node_mut();
+        if !node.is_directory { return; }
+        if node.is_expanded {
+            self.collapse_selected();
+        } else {
+            self.expand_selected();
+        }
+    }
+
+    // Navigation logic (select_next, select_previous) remains complex but should be okay
+    // ... (select_next and select_previous functions are unchanged)
     pub fn select_next(&mut self) {
         let mut current_node = &self.root;
         for &index in &self.selected {
@@ -116,7 +165,6 @@ impl FileTree {
                     self.selected.pop();
                 }
             }
-            // If we popped everything, reset to the first element
             if self.selected.is_empty() {
                 self.selected.push(0);
             }
