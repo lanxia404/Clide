@@ -180,6 +180,17 @@ fn render_editor(app: &mut App, f: &mut Frame, area: Rect) {
         }
         lines.push(Line::from(spans).style(line_style));
     }
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .scroll((app.editor.vertical_scroll as u16, 0));
+    
     f.render_widget(paragraph, inner_area);
+
+    // Set the terminal cursor position
+    if app.focus == Focus::Editor {
+        f.set_cursor(
+            inner_area.x + (app.editor.cursor_col + line_number_width + 3) as u16,
+            inner_area.y + (app.editor.cursor_row - app.editor.vertical_scroll) as u16,
+        );
+    }
 }

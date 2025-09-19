@@ -164,8 +164,18 @@ impl App {
         }
     }
 
-    fn handle_editor_keys(&mut self, _key_event: KeyEvent) {
-        // TODO: Pass keys to editor
+    fn handle_editor_keys(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Up => self.editor.move_cursor_up(),
+            KeyCode::Down => self.editor.move_cursor_down(),
+            KeyCode::Left => self.editor.move_cursor_left(),
+            KeyCode::Right => self.editor.move_cursor_right(),
+            _ => {}
+        }
+        // After any potential movement, ensure the viewport is scrolled correctly.
+        // The inner area height is the editor_area height minus 2 for the borders.
+        let view_height = self.editor_area.height.saturating_sub(2);
+        self.editor.scroll(view_height as usize);
     }
 
     fn handle_enter_on_file_tree(&mut self) {
