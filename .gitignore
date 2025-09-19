@@ -48,4 +48,11 @@ venv/
 Thumbs.db
 
 # Logs
-/logs
+logs/
+
+screen_shot/
+
+
+# Added by cargo
+
+/target
