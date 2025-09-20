@@ -1,14 +1,12 @@
+use super::TreeNode;
 use crate::app::{App, Focus};
-use crate::file_tree::TreeNode;
+use crate::components::header::{ACCENT_COLOR, TEXT_COLOR};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
-
-// Re-exporting from layout.rs to keep it DRY
-use super::layout::{ACCENT_COLOR, TEXT_COLOR};
 
 pub fn render_file_tree(app: &mut App, f: &mut Frame, area: Rect) {
     let mut items = Vec::new();

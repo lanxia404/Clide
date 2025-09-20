@@ -1,26 +1,25 @@
 // src/main.rs
 pub mod app;
-pub mod editor;
+pub mod components;
+pub mod core;
 pub mod event;
-pub mod file_tree;
-pub mod git;
-pub mod i18n;
-pub mod lsp;
-pub mod plugin;
-pub mod syntax;
-pub mod terminal;
+pub mod features;
 pub mod tui;
 pub mod ui;
 
 use anyhow::Result;
 use app::App;
+use core::lsp;
 use crossterm::event::{Event as CrosstermEvent, EventStream};
 use event::Event;
-use lsp_types::{notification::{Notification, PublishDiagnostics}, PublishDiagnosticsParams};
+use lsp_types::{
+    notification::{Notification, PublishDiagnostics},
+    PublishDiagnosticsParams,
+};
 use std::{panic, time::Duration};
 use tokio_stream::StreamExt;
 use tui::{init, restore};
-use ui::render;
+use ui::layout::render;
 use url::Url;
 
 #[tokio::main]

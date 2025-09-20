@@ -1,3 +1,8 @@
+// src/components/editor/mod.rs
+
+pub mod view;
+
+// ... (The rest of the original src/editor.rs content)
 use std::cmp::min;
 use std::collections::HashMap;
 use std::path::PathBuf;

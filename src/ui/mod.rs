@@ -1,7 +1,3 @@
-mod editor;
-mod file_tree;
-mod layout;
-pub mod git;
-pub mod terminal;
+// src/ui/mod.rs
 
-pub use layout::render;
+pub mod layout;

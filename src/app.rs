@@ -1,17 +1,17 @@
 // src/app.rs
-use crate::editor::Editor;
+
+use crate::components::editor::Editor;
+use crate::components::file_tree::FileTree;
+use crate::core::i18n::{English, Language, SimplifiedChinese, TraditionalChinese};
+use crate::core::lsp::{LspClient, LspMessage, LspNotification, LspResponse};
+use crate::core::syntax::SyntaxHighlighter;
 use crate::event::Event;
-use crate::file_tree::FileTree;
-use crate::git::GitState;
-use crate::i18n::{English, SimplifiedChinese, TraditionalChinese, Language};
-use crate::lsp::{LspClient, LspMessage, LspNotification, LspResponse};
-use crate::plugin::PluginManager;
-use crate::syntax::SyntaxHighlighter;
-use crate::terminal::TerminalState;
+use crate::features::git::GitState;
+use crate::features::plugin::PluginManager;
+use crate::features::terminal::TerminalState;
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind, MouseButton};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use lsp_types::{Diagnostic, InitializeParams, WorkspaceFolder};
-use url::Url;
 use ratatui::layout::Rect;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -20,11 +20,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tokio::{
+use tokio::
+{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
+use url::Url;
 
 // ... (Enums remain the same)
 pub enum IconSet {
@@ -69,6 +71,18 @@ pub enum LspStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragKind {
+    Vertical,
+    // Horizontal, // For future implementation
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DraggingState {
+    pub kind: DragKind,
+    pub start_mouse_col: u16,
+    pub start_percent: u16,
+}
 
 #[allow(dead_code)]
 pub struct App {
@@ -88,7 +102,6 @@ pub struct App {
     pub file_tree_area: Rect,
     pub editor_area: Rect,
     last_click: Option<(Instant, MouseEvent)>,
-    drag_start_row: Option<u16>,
     last_cursor_move: Instant,
     pub active_panel: Option<ActivePanel>,
     pub terminal: TerminalState,
@@ -100,6 +113,8 @@ pub struct App {
     git_state_receiver: mpsc::Receiver<GitState>,
     git_state_sender: mpsc::Sender<GitState>,
     pub lsp_message: Option<String>,
+    pub file_tree_width_percent: u16,
+    pub dragging: Option<DraggingState>,
 }
 
 impl App {
@@ -128,7 +143,6 @@ impl App {
             file_tree_area: Rect::default(),
             editor_area: Rect::default(),
             last_click: None,
-            drag_start_row: None,
             last_cursor_move: Instant::now(),
             active_panel: None,
             terminal: TerminalState::new(),
@@ -140,6 +154,8 @@ impl App {
             git_state_receiver,
             git_state_sender,
             lsp_message: None,
+            file_tree_width_percent: 25,
+            dragging: None,
         };
 
         app.start_lsp_server(lsp_writer_tx, lsp_writer_rx, lsp_event_tx);
@@ -154,7 +170,7 @@ impl App {
         lsp_event_tx: UnboundedSender<LspMessage>,
     ) {
         let root_path = env::current_dir().unwrap();
-        
+
         tokio::spawn(async move {
             let server_process = Command::new("rust-analyzer")
                 .stdin(Stdio::piped())
@@ -171,14 +187,15 @@ impl App {
                 tokio::spawn(reader_task(stdout, lsp_event_tx.clone()));
                 tokio::spawn(stderr_task(stderr, lsp_event_tx.clone()));
 
-                                    let root_uri_url = Url::from_directory_path(root_path).unwrap();
-                                    let root_uri: lsp_types::Uri = root_uri_url.as_str().parse().unwrap();
-                                    let params = InitializeParams {
-                                        process_id: Some(std::process::id()),
-                                        workspace_folders: Some(vec![WorkspaceFolder {
-                                            uri: root_uri,
-                                            name: "Clide".to_string(),
-                                        }]),                    capabilities: lsp_types::ClientCapabilities::default(),
+                let root_uri_url = Url::from_directory_path(root_path).unwrap();
+                let root_uri: lsp_types::Uri = root_uri_url.as_str().parse().unwrap();
+                let params = InitializeParams {
+                    process_id: Some(std::process::id()),
+                    workspace_folders: Some(vec![WorkspaceFolder {
+                        uri: root_uri,
+                        name: "Clide".to_string(),
+                    }]),
+                    capabilities: lsp_types::ClientCapabilities::default(),
                     ..Default::default()
                 };
                 let request = serde_json::json!({
@@ -188,10 +205,13 @@ impl App {
                     "params": params,
                 });
                 let _ = lsp_writer_tx.send(request);
-                
-                // self.lsp_server = Some(server); // Cannot borrow self in async move block
+
+            // self.lsp_server = Some(server); // Cannot borrow self in async move block
             } else {
-                let _ = lsp_event_tx.send(LspMessage::Error(1, serde_json::json!({"message": "Failed to start rust-analyzer"})));
+                let _ = lsp_event_tx.send(LspMessage::Error(
+                    1,
+                    serde_json::json!({"message": "Failed to start rust-analyzer"}),
+                ));
             }
         });
     }
@@ -204,7 +224,13 @@ impl App {
             && self.last_cursor_move.elapsed() > Duration::from_millis(500)
             && let Some(path) = &self.editor.path
         {
-            self.lsp_client.hover(path, self.editor.cursor_row as u32, self.editor.cursor_col as u32).unwrap_or(());
+            self.lsp_client
+                .hover(
+                    path,
+                    self.editor.cursor_row as u32,
+                    self.editor.cursor_col as u32,
+                )
+                .unwrap_or(());
             self.last_cursor_move = Instant::now();
         }
 
@@ -223,6 +249,42 @@ impl App {
     }
 
     fn handle_mouse_event(&mut self, event: MouseEvent) {
+        // --- DRAGGING LOGIC ---
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Check if the click is on the vertical border between file tree and editor
+                let border_x = self.file_tree_area.right();
+                if self.file_tree_area.width > 0 && event.column == border_x {
+                    self.dragging = Some(DraggingState {
+                        kind: DragKind::Vertical,
+                        start_mouse_col: event.column,
+                        start_percent: self.file_tree_width_percent,
+                    });
+                    return; // Consume the event
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(drag_state) = self.dragging {
+                    let total_width = self.file_tree_area.width + self.editor_area.width;
+                    if total_width > 0 {
+                        let delta_x = event.column as i16 - drag_state.start_mouse_col as i16;
+                        let delta_percent = (delta_x as f32 * 100.0 / total_width as f32).round() as i16;
+                        let new_percent = (drag_state.start_percent as i16 + delta_percent) as u16;
+                        self.file_tree_width_percent = new_percent.clamp(10, 90);
+                    }
+                    return; // Consume the event
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if self.dragging.is_some() {
+                    self.dragging = None;
+                    return; // Consume the event
+                }
+            }
+            _ => {}
+        }
+
+        // --- REGULAR MOUSE LOGIC ---
         let is_double_click = if let Some((last_time, last_event)) = self.last_click {
             let now = Instant::now();
             now.duration_since(last_time) < Duration::from_millis(300)
@@ -254,8 +316,11 @@ impl App {
             self.focus = Focus::Editor;
             if event.kind == MouseEventKind::Down(MouseButton::Left) {
                 let line_number_width = self.editor.content.len().to_string().len();
-                let col = event.column.saturating_sub(self.editor_area.x + line_number_width as u16 + 3);
-                let row = event.row.saturating_sub(self.editor_area.y + 1) + self.editor.vertical_scroll as u16;
+                let col = event
+                    .column
+                    .saturating_sub(self.editor_area.x + line_number_width as u16 + 3);
+                let row = event.row.saturating_sub(self.editor_area.y + 1)
+                    + self.editor.vertical_scroll as u16;
                 self.editor.move_cursor_to(row as usize, col as usize);
             }
         }
@@ -269,7 +334,7 @@ impl App {
                 }
             }
             Focus::Editor => {
-                 if event.kind == MouseEventKind::ScrollUp {
+                if event.kind == MouseEventKind::ScrollUp {
                     self.editor.move_cursor_up();
                 } else if event.kind == MouseEventKind::ScrollDown {
                     self.editor.move_cursor_down();
@@ -289,20 +354,43 @@ impl App {
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         let global_handled = match (key_event.code, key_event.modifiers) {
-            (KeyCode::Char('q'), KeyModifiers::CONTROL) => { self.running = false; true },
-            (KeyCode::Char('l'), KeyModifiers::CONTROL) => { self.toggle_language(); true },
-            (KeyCode::Char('s'), KeyModifiers::CONTROL) => { self.save_file(); true },
-            (KeyCode::Char('w'), KeyModifiers::CONTROL) => { self.toggle_focus(); true },
-            (KeyCode::Char('t'), KeyModifiers::CONTROL) => { self.toggle_panel(ActivePanel::Terminal); true },
-            (KeyCode::Char('g'), KeyModifiers::CONTROL) => { self.toggle_panel(ActivePanel::Git); true },
+            (KeyCode::Char('q'), KeyModifiers::CONTROL) => {
+                self.running = false;
+                true
+            }
+            (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
+                self.toggle_language();
+                true
+            }
+            (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
+                self.save_file();
+                true
+            }
+            (KeyCode::Char('w'), KeyModifiers::CONTROL) => {
+                self.toggle_focus();
+                true
+            }
+            (KeyCode::Char('t'), KeyModifiers::CONTROL) => {
+                self.toggle_panel(ActivePanel::Terminal);
+                true
+            }
+            (KeyCode::Char('g'), KeyModifiers::CONTROL) => {
+                self.toggle_panel(ActivePanel::Git);
+                true
+            }
             _ => false,
         };
 
-        if global_handled { return; }
+        if global_handled {
+            return;
+        }
 
         if let Some(active_panel) = self.active_panel {
             match active_panel {
-                ActivePanel::Terminal => { self.terminal.handle_key_event(key_event); return; },
+                ActivePanel::Terminal => {
+                    self.terminal.handle_key_event(key_event);
+                    return;
+                }
                 ActivePanel::Git => {}
             }
         }
@@ -375,7 +463,13 @@ impl App {
                 self.editor.insert_text(&c.to_string());
                 if c == '.' || c == ':' {
                     if let Some(path) = &self.editor.path {
-                        self.lsp_client.completion(path, self.editor.cursor_row as u32, self.editor.cursor_col as u32).unwrap_or(());
+                        self.lsp_client
+                            .completion(
+                                path,
+                                self.editor.cursor_row as u32,
+                                self.editor.cursor_col as u32,
+                            )
+                            .unwrap_or(());
                     }
                 }
             }
@@ -410,13 +504,14 @@ impl App {
             if std::fs::write(path, content).is_ok() {
                 self.editor.dirty = false;
             } else {
+                // In a real app, this should show a message to the user in the UI
                 eprintln!("Failed to save file!");
             }
         }
     }
 
     fn toggle_focus(&mut self) {
-        self.focus = match self.focus {
+        self.focus = match &self.focus {
             Focus::FileTree => Focus::Editor,
             Focus::Editor => Focus::FileTree,
         };
@@ -467,7 +562,10 @@ async fn writer_task(mut stdin: tokio::process::ChildStdin, mut rx: UnboundedRec
     }
 }
 
-async fn reader_task<T: tokio::io::AsyncRead + Unpin>(stream: T, msg_tx: UnboundedSender<LspMessage>) {
+async fn reader_task<T: tokio::io::AsyncRead + Unpin>(
+    stream: T,
+    msg_tx: UnboundedSender<LspMessage>,
+) {
     let mut reader = BufReader::new(stream);
     let mut buffer = String::new();
     let mut content_length: Option<usize> = None;
@@ -475,7 +573,9 @@ async fn reader_task<T: tokio::io::AsyncRead + Unpin>(stream: T, msg_tx: Unbound
     loop {
         buffer.clear();
         if let Ok(bytes_read) = reader.read_line(&mut buffer).await {
-            if bytes_read == 0 { break; }
+            if bytes_read == 0 {
+                break;
+            }
             if buffer.starts_with("Content-Length:") {
                 if let Some(len_str) = buffer.trim().split(':').nth(1) {
                     content_length = len_str.trim().parse::<usize>().ok();
@@ -485,9 +585,16 @@ async fn reader_task<T: tokio::io::AsyncRead + Unpin>(stream: T, msg_tx: Unbound
                 if let Some(length) = content_length {
                     let mut body_buffer = vec![0; length];
                     if reader.read_exact(&mut body_buffer).await.is_ok() {
-                        if let Ok(notification) = serde_json::from_slice::<LspNotification>(&body_buffer) {
-                            let _ = msg_tx.send(LspMessage::Notification(notification.method, notification.params));
-                        } else if let Ok(response) = serde_json::from_slice::<LspResponse>(&body_buffer) {
+                        if let Ok(notification) =
+                            serde_json::from_slice::<LspNotification>(&body_buffer)
+                        {
+                            let _ = msg_tx.send(LspMessage::Notification(
+                                notification.method,
+                                notification.params,
+                            ));
+                        } else if let Ok(response) =
+                            serde_json::from_slice::<LspResponse>(&body_buffer)
+                        {
                             match response {
                                 LspResponse::Success { id, result } => {
                                     let _ = msg_tx.send(LspMessage::Response(id, result));
@@ -511,7 +618,9 @@ async fn stderr_task(stderr: tokio::process::ChildStderr, msg_tx: UnboundedSende
     let mut reader = BufReader::new(stderr);
     let mut buffer = String::new();
     while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
-        if bytes_read == 0 { break; }
+        if bytes_read == 0 {
+            break;
+        }
         let _ = msg_tx.send(LspMessage::Stderr(buffer.trim_end().to_string()));
         buffer.clear();
     }

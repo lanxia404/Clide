@@ -42,24 +42,29 @@ src/
 └── i18n.rs         # 國際化 (i18n) Trait 和語言實作
 ```
 
-### 核心流程
+### 核心流程 (詳細說明)
 
-1.  **`main.rs`**:
-    - 初始化終端機 (`tui::init`)。
-    - 建立 `App` 實例 (`app::App::new`)，其中包含了所有狀態。
-    - 進入 `while app.running` 主迴圈。
-    - 使用 `tokio::select!` 同時監聽終端機事件 (鍵盤、滑鼠) 和 LSP 伺服器訊息。
-    - 將接收到的事件分派給 `app.handle_event()` 進行處理。
-    - 每一幀都呼叫 `tui.draw()`，並傳入 `ui::render` 函數來繪製介面。
-2.  **`app.rs`**:
-    - `App` 結構體是單一事實來源 (Single Source of Truth)，持有 `FileTree`, `Editor`, `LspClient` 等狀態。
-    - `handle_event` 方法根據目前的 `focus` (檔案樹或編輯器) 將事件路由到對應的處理函數。
-    - 包含打開檔案、儲存檔案、切換語言、切換焦點等核心業務邏輯。
-3.  **`ui/layout.rs`**:
-    - `render` 函數是 UI 繪製的入口。
-    - 它首先繪製整體佈局 (頁首、內容、頁尾)。
-    - 根據終端機寬度和 `app.focus` 狀態，決定是渲染單欄視圖還是雙欄視圖。
-    - 呼叫 `render_file_tree` 和 `render_editor` 來繪製具體的 UI 元件。
+為了解決 LSP `stderr` 直接輸出導致 TUI 渲染混亂的問題，專案採用了**狀態驅動的事件處理模型**。其核心是將所有外部輸入（包括 LSP 的 `stderr`）轉化為結構化的事件，在主事件迴圈中統一處理，更新中央狀態，最後由 UI 進行渲染。
+
+1.  **`lsp.rs` - 事件定義**:
+    - `LspMessage` 枚舉被擴展，加入了 `Stderr(String)` 型別。
+    - **設計理念**: 這一步是關鍵，它將原始的、非結構化的 `stderr` 字串提升為應用程式可以理解的、有明確語義的事件。
+
+2.  **`app.rs` - 訊息捕獲與狀態管理**:
+    - `App` 結構體新增了 `lsp_message: Option<String>` 欄位。它作為一個狀態緩衝區，儲存從 LSP 收到的最新一條 `stderr` 訊息。
+    - `start_lsp_server` 方法在啟動 `rust-analyzer` 子程序時，會為其 `stderr` 流建立一個專門的非同步任務 `stderr_task`。
+    - `stderr_task` 的職責被徹底改變：它不再使用 `eprintln!` 直接打印，而是讀取 `stderr` 的每一行，將其包裝成 `LspMessage::Stderr` 事件，並透過 `mpsc` channel 發送到主事件迴圈。
+    - **設計理念**: 這實現了**輸入/輸出的解耦**。LSP 子程序可以自由地輸出其內部狀態或錯誤，而主應用程式則以一種受控的、非阻塞的方式接收這些訊息，完全避免了對 TUI 渲染的直接干擾。
+
+3.  **`main.rs` - 統一事件迴圈**:
+    - `tokio::select!` 巨集是整個應用的心臟。它平等地等待來自不同來源的事件：`crossterm` 的終端機輸入和 `lsp_receiver` 的 LSP 訊息。
+    - `match lsp_message` 區塊中新增了一個分支：`lsp::LspMessage::Stderr(msg) => { app.lsp_message = Some(msg); }`。
+    - **設計理念**: 當 `Stderr` 訊息到達時，它不會立即觸發任何 UI 操作，而僅僅是更新 `App` 這個**單一事實來源 (Single Source of Truth)**。這確保了所有狀態變更都集中在一個地方，使得邏輯清晰且易於除錯。
+
+4.  **`ui/layout.rs` - 狀態驅動的渲染**:
+    - `render_footer` 函數在每一幀被呼叫時，會檢查 `app.lsp_message` 的狀態。
+    - **渲染邏輯**: 如果 `app.lsp_message` 是 `Some(msg)`，則將 `msg` 的內容顯示在狀態列的右側。它擁有比一般診斷訊息更高的顯示優先級。如果為 `None`，則回退顯示游標位置的診斷訊息或預設提示。
+    - **設計理念**: UI 的繪製完全依賴於 `App` 的當前狀態，而不是由事件直接驅動。這是一個典型的**宣告式 UI** 模式，`ratatui` 正是為此而設計。UI 只是狀態的一個「鏡像」，狀態改變，UI 自動更新，使得渲染邏輯保持簡單和可預測。
 
 ## 3. 關鍵依賴 (Dependencies)
 
@@ -113,3 +118,17 @@ cargo test
 -   **整合終端機面板**: 在 IDE 中內建一個可互動的終端機面板。
 -   **Git 整合**: 直接在 UI 中顯示 Git 狀態、執行 Git 命令。
 -   **效能優化**: 對於大型檔案的編輯和渲染進行效能分析與優化，例如虛擬捲動 (virtual scrolling)。
+
+## 6. 未來開發日程 (TODO)
+
+這部分記錄了專案未來的主要開發方向和宏大目標。
+
+- [ ] **架構重構：更換 TUI 引擎**
+  - **目標**: 將目前的 TUI 引擎從 `ratatui` 更換為 `microsoft/edit` 專案的自訂 TUI 引擎。
+  - **動機**: 為了更深度地整合 `edit` 專案的效能優化、外觀和底層邏輯，實現更一致的使用者體驗。
+  - **涉及範圍**:
+    - 移植 `edit` 的 TUI 核心程式碼。
+    - 完全重寫 `src/ui/` 目錄下的所有渲染邏輯。
+    - 重構 `main.rs` 的主事件迴圈。
+    - 調整 `app.rs` 的狀態管理以適應新引擎。
+  - **備註**: 這是一項巨大的工程，需要對兩個專案的原始碼都有深入的理解。

@@ -11,7 +11,7 @@ use syntect::easy::HighlightLines;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 // Re-exporting from layout.rs to keep it DRY
-use super::layout::{ACCENT_COLOR, TEXT_COLOR};
+use crate::components::header::{ACCENT_COLOR, TEXT_COLOR};
 
 pub fn render_editor(app: &mut App, f: &mut Frame, area: Rect) {
     if app.editor.terminal_width != area.width {

@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::git::GitState;
+use super::git::GitState;
 use ratatui::{
     layout::Rect,
     style::{Color, Style},

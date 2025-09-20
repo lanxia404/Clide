@@ -1,3 +1,8 @@
+// src/components/file_tree/mod.rs
+
+pub mod view;
+
+// ... (The rest of the original src/file_tree.rs content)
 use crossterm::event::{KeyEvent, KeyCode, MouseEvent, MouseEventKind};
 use std::fs;
 use std::path::{Path, PathBuf};

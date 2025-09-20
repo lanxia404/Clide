@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::terminal::TerminalState;
+use super::terminal::TerminalState;
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
