@@ -25,6 +25,12 @@ pub struct Editor {
     pub redo_stack: Vec<EditorState>,
 }
 
+impl Default for Editor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Editor {
     pub fn new() -> Self {
         Self {
@@ -67,19 +73,17 @@ impl Editor {
     pub fn push_undo_state(&mut self) {
         let last_state = self.undo_stack.last();
         let current_state = self.current_state();
-        if last_state.map_or(true, |s| s.content != current_state.content) {
+        if last_state.is_none_or(|s| s.content != current_state.content) {
             self.undo_stack.push(current_state);
             self.redo_stack.clear();
         }
     }
 
     pub fn undo(&mut self) {
-        if self.undo_stack.len() > 1 {
-            if let Some(state) = self.undo_stack.pop() {
-                self.redo_stack.push(state);
-                if let Some(last_state) = self.undo_stack.last() {
-                    self.restore_state(last_state.clone());
-                }
+        if self.undo_stack.len() > 1 && let Some(state) = self.undo_stack.pop() {
+            self.redo_stack.push(state);
+            if let Some(last_state) = self.undo_stack.last() {
+                self.restore_state(last_state.clone());
             }
         }
     }
@@ -136,11 +140,11 @@ impl Editor {
         self.cursor_col = min(self.cursor_col, line_len);
     }
 
-    pub fn insert_char(&mut self, c: char) {
+    pub fn insert_text(&mut self, text: &str) {
         self.push_undo_state();
         let current_line = &mut self.content[self.cursor_row];
-        current_line.insert(self.cursor_col, c);
-        self.cursor_col += 1;
+        current_line.insert_str(self.cursor_col, text);
+        self.cursor_col += text.len();
         self.dirty = true;
         self.layout_cache.remove(&self.cursor_row);
     }

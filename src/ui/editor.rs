@@ -150,18 +150,12 @@ pub fn render_editor(app: &mut App, f: &mut Frame, area: Rect) {
         let mut gutter_symbol = " │ ";
         let mut highest_severity = None;
 
-        if let Some(path) = &app.editor.path {
-            if let Ok(uri) = Url::from_file_path(path) {
-                if let Some(diagnostics) = app.diagnostics.get(&uri) {
-                    if let Some(idx) = line_idx {
-                        for d in diagnostics {
-                            if d.range.start.line as usize == idx {
-                                let severity = d.severity.unwrap_or(lsp_types::DiagnosticSeverity::HINT);
-                                if highest_severity.is_none() || severity < highest_severity.unwrap() {
-                                    highest_severity = Some(severity);
-                                }
-                            }
-                        }
+        if let Some(path) = &app.editor.path && let Ok(uri) = Url::from_file_path(path) && let Some(diagnostics) = app.diagnostics.get(&uri) && let Some(idx) = line_idx {
+            for d in diagnostics {
+                if d.range.start.line as usize == idx {
+                    let severity = d.severity.unwrap_or(lsp_types::DiagnosticSeverity::HINT);
+                    if highest_severity.is_none() || severity < highest_severity.unwrap() {
+                        highest_severity = Some(severity);
                     }
                 }
             }
@@ -195,12 +189,10 @@ pub fn render_editor(app: &mut App, f: &mut Frame, area: Rect) {
     f.render_widget(text_paragraph, text_area);
 
     // --- 5. Set Cursor Position ---
-    if app.focus == Focus::Editor {
-        if let (Some(abs_y), Some(x)) = (cursor_abs_visual_y, cursor_visual_x) {
-            let relative_y = abs_y.saturating_sub(app.editor.vertical_scroll);
-            if relative_y < view_height {
-                f.set_cursor(text_area.x + x, text_area.y + relative_y as u16);
-            }
+    if app.focus == Focus::Editor && let (Some(abs_y), Some(x)) = (cursor_abs_visual_y, cursor_visual_x) {
+        let relative_y = abs_y.saturating_sub(app.editor.vertical_scroll);
+        if relative_y < view_height {
+            f.set_cursor_position((text_area.x + x, text_area.y + relative_y as u16));
         }
     }
 }

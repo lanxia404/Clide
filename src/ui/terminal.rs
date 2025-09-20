@@ -2,7 +2,7 @@ use crate::app::App;
 use crate::terminal::TerminalState;
 use ratatui::{
     layout::Rect,
-    style::{Color, Style, Stylize},
+    style::{Color, Style},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
@@ -34,9 +34,9 @@ pub fn render_terminal_panel(f: &mut Frame, area: Rect, state: &TerminalState, a
 
     // Set cursor for the input line
     if app.active_panel == Some(crate::app::ActivePanel::Terminal) {
-        f.set_cursor(
+        f.set_cursor_position((
             area.x + 2 + state.input_line.len() as u16,
             area.y + 1 + state.output_buffer.len() as u16,
-        );
+        ));
     }
 }

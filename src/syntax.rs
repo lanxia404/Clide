@@ -7,6 +7,12 @@ pub struct SyntaxHighlighter {
     pub theme_set: ThemeSet,
 }
 
+impl Default for SyntaxHighlighter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SyntaxHighlighter {
     pub fn new() -> Self {
         Self {

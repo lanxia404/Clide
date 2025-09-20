@@ -2,7 +2,7 @@ use crate::app::App;
 use crate::git::GitState;
 use ratatui::{
     layout::Rect,
-    style::{Color, Style, Stylize},
+    style::{Color, Style},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };

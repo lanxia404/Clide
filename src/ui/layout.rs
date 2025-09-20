@@ -68,12 +68,10 @@ pub fn render(app: &mut App, f: &mut Frame) {
         render_editor(app, f, app.editor_area);
     }
 
-    if let Some(panel_area) = panel_area {
-        if let Some(active_panel) = &app.active_panel {
-            match active_panel {
-                ActivePanel::Terminal => render_terminal_panel(f, panel_area, &app.terminal, app),
-                ActivePanel::Git => render_git_panel(f, panel_area, &app.git, app),
-            }
+    if let Some(panel_area) = panel_area && let Some(active_panel) = &app.active_panel {
+        match active_panel {
+            ActivePanel::Terminal => render_terminal_panel(f, panel_area, &app.terminal, app),
+            ActivePanel::Git => render_git_panel(f, panel_area, &app.git, app),
         }
     }
 
@@ -103,15 +101,14 @@ fn render_footer(app: &App, f: &mut Frame, area: Rect) {
     );
 
     let mut right_side_text = app.lang.footer_lang_toggle().to_string();
-    if let Some(path) = &app.editor.path {
-        if let Ok(uri) = Url::from_file_path(path) {
-            if let Some(diagnostics) = app.diagnostics.get(&uri) {
-                for d in diagnostics {
-                    if d.range.start.line as usize == app.editor.cursor_row {
-                        right_side_text = d.message.clone();
-                        break;
-                    }
-                }
+
+    if let Some(msg) = &app.lsp_message {
+        right_side_text = msg.clone();
+    } else if let Some(path) = &app.editor.path && let Ok(uri) = Url::from_file_path(path) && let Some(diagnostics) = app.diagnostics.get(&uri) {
+        for d in diagnostics {
+            if d.range.start.line as usize == app.editor.cursor_row {
+                right_side_text = d.message.clone();
+                break;
             }
         }
     }
@@ -148,7 +145,19 @@ fn render_lsp_popup(app: &mut App, f: &mut Frame) {
     };
 
     if let Some(items) = &app.completion_list {
-        let list_items: Vec<ListItem> = items.iter().map(|item| ListItem::new(item.label.clone())).collect();
+        let list_items: Vec<ListItem> = items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let style = if app.completion_selection == Some(i) {
+                    Style::default().bg(ACCENT_COLOR).fg(Color::White)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(item.label.clone()).style(style)
+            })
+            .collect();
+
         let list_widget = List::new(list_items).block(block);
         f.render_widget(Clear, popup_area);
         f.render_widget(list_widget, popup_area);

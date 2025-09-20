@@ -6,6 +6,12 @@ pub struct GitState {
     pub status: Vec<String>,
 }
 
+impl Default for GitState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GitState {
     pub fn new() -> Self {
         Self {
@@ -37,14 +43,12 @@ impl GitState {
             .output()
             .await;
         
-        if let Ok(output) = status_output {
-            if output.status.success() {
-                let status_text = String::from_utf8_lossy(&output.stdout);
-                if status_text.trim().is_empty() {
-                    self.status = vec!["No changes.".to_string()];
-                } else {
-                    self.status = status_text.trim().lines().map(String::from).collect();
-                }
+        if let Ok(output) = status_output && output.status.success() {
+            let status_text = String::from_utf8_lossy(&output.stdout);
+            if status_text.trim().is_empty() {
+                self.status = vec!["No changes.".to_string()];
+            } else {
+                self.status = status_text.trim().lines().map(String::from).collect();
             }
         }
     }

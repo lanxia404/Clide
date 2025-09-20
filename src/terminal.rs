@@ -10,6 +10,12 @@ pub struct TerminalState {
     output_tx: mpsc::Sender<String>,
 }
 
+impl Default for TerminalState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TerminalState {
     pub fn new() -> Self {
         let (output_tx, output_rx) = mpsc::channel(100);

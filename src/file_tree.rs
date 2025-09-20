@@ -118,10 +118,8 @@ impl FileTree {
         let node = self.get_selected_node_mut();
         if !node.is_directory { return; }
         if !node.is_expanded {
-            if node.children.is_empty() {
-                if let Ok(children) = Self::scan_directory(&node.path) {
-                    node.children = children;
-                }
+            if node.children.is_empty() && let Ok(children) = Self::scan_directory(&node.path) {
+                node.children = children;
             }
             node.is_expanded = true;
         }
