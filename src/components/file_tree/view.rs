@@ -9,13 +9,49 @@ use ratatui::{
 };
 
 pub fn render_file_tree(app: &mut App, f: &mut Frame, area: Rect) {
-    let mut items = Vec::new();
-    let mut total_items = 0;
-    let mut selection_index = 0;
+    let (items, selection_index) = traverse_tree(app, &app.file_tree.root, &app.file_tree.selected);
 
-    fn traverse_tree<'a>(
-        app: &App, node: &'a TreeNode, items: &mut Vec<ListItem<'a>>, depth: usize,
-        current_path: &mut Vec<usize>, total_items: &mut usize, selection_index: &mut usize,
+    let border_style = if app.focus == Focus::FileTree {
+        Style::default().fg(ACCENT_COLOR)
+    } else {
+        Style::default().fg(TEXT_COLOR)
+    };
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title(app.lang.file_tree_title())
+                .borders(Borders::ALL)
+                .border_type(ratatui::widgets::BorderType::Rounded)
+                .style(Style::default().fg(TEXT_COLOR))
+                .border_style(border_style),
+        )
+        .highlight_style(Style::default().bg(ACCENT_COLOR).add_modifier(Modifier::BOLD))
+        .highlight_symbol(" > ");
+
+    let mut state = ListState::default();
+    state.select(selection_index);
+    f.render_stateful_widget(list, area, &mut state);
+}
+
+/// Recursively traverses the file tree and returns a flattened list of items and the selected index.
+fn traverse_tree<'a>(
+    app: &'a App,
+    node: &'a TreeNode,
+    selected_path: &[usize],
+) -> (Vec<ListItem<'a>>, Option<usize>) {
+    let mut items = Vec::new();
+    let mut selection_index = None;
+    
+    // A recursive helper function to build the list and track the selection index.
+    fn build_list<'b>(
+        app: &'b App,
+        node: &'b TreeNode,
+        depth: usize,
+        current_path: &mut Vec<usize>,
+        items: &mut Vec<ListItem<'b>>,
+        selected_path: &[usize],
+        selection_index: &mut Option<usize>,
     ) {
         let file_name_owned;
         let file_name = match &node.display_name {
@@ -41,32 +77,24 @@ pub fn render_file_tree(app: &mut App, f: &mut Frame, area: Rect) {
             }
         };
         let line = format!("{} {} {}", "  ".repeat(depth), icon, file_name);
-        if current_path == &app.file_tree.selected { *selection_index = *total_items; }
+        
+        if current_path == selected_path {
+            *selection_index = Some(items.len());
+        }
+        
         items.push(ListItem::new(line).style(Style::default().fg(TEXT_COLOR)));
-        *total_items += 1;
+
         if node.is_expanded {
             for (i, child) in node.children.iter().enumerate() {
                 current_path.push(i);
-                traverse_tree(app, child, items, depth + 1, current_path, total_items, selection_index);
+                build_list(app, child, depth + 1, current_path, items, selected_path, selection_index);
                 current_path.pop();
             }
         }
     }
 
-    traverse_tree(app, &app.file_tree.root, &mut items, 0, &mut vec![], &mut total_items, &mut selection_index);
-
-    let border_style = if app.focus == Focus::FileTree { Style::default().fg(ACCENT_COLOR) } else { Style::default().fg(TEXT_COLOR) };
-    let list = List::new(items)
-        .block(
-            Block::default().title(app.lang.file_tree_title()).borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded)
-                .style(Style::default().fg(TEXT_COLOR)).border_style(border_style)
-        )
-        .highlight_style(Style::default().bg(ACCENT_COLOR).add_modifier(Modifier::BOLD))
-        .highlight_symbol(" > ");
-    let mut state = ListState::default();
-    state.select(Some(selection_index));
-    f.render_stateful_widget(list, area, &mut state);
+    build_list(app, node, 0, &mut vec![], &mut items, selected_path, &mut selection_index);
+    (items, selection_index)
 }
 
 // --- ICON LOGIC ---

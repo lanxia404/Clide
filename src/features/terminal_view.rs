@@ -8,7 +8,9 @@ use ratatui::{
 };
 
 pub fn render_terminal_panel(f: &mut Frame, area: Rect, state: &TerminalState, app: &App) {
-    let border_style = if app.active_panel == Some(crate::app::ActivePanel::Terminal) {
+    let is_active = app.active_panel == Some(crate::app::ActivePanel::Terminal);
+
+    let border_style = if is_active {
         Style::default().fg(Color::Cyan)
     } else {
         Style::default().fg(Color::White)
@@ -32,11 +34,14 @@ pub fn render_terminal_panel(f: &mut Frame, area: Rect, state: &TerminalState, a
 
     f.render_widget(paragraph, area);
 
-    // Set cursor for the input line
-    if app.active_panel == Some(crate::app::ActivePanel::Terminal) {
-        f.set_cursor_position((
-            area.x + 2 + state.input_line.len() as u16,
-            area.y + 1 + state.output_buffer.len() as u16,
-        ));
+    // Set cursor for the input line, ensuring it stays within bounds
+    if is_active {
+        let cursor_x = area.x + 2 + state.input_line.len() as u16;
+        let cursor_y = area.y + 1 + state.output_buffer.len() as u16;
+        
+        // Clamp the cursor position to be within the visible area of the panel
+        if cursor_y < area.bottom() -1 {
+             f.set_cursor_position((cursor_x, cursor_y));
+        }
     }
 }

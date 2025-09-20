@@ -6,10 +6,12 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1.0"
+arboard = "3.6.1"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 encoding_rs = "0.8.35"
 encoding_rs_io = "0.1.7"
 lsp-types = "0.97.0"
+open = "5.3.2"
 ratatui = "0.29.0"
 serde = "1.0.225"
 serde_json = "1.0.145"

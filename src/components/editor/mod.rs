@@ -2,11 +2,12 @@
 
 pub mod view;
 
-// ... (The rest of the original src/editor.rs content)
 use std::cmp::min;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use ratatui::text::Line;
+
+const MAX_UNDO_STATES: usize = 100;
 
 #[derive(Clone)]
 pub struct EditorState {
@@ -28,6 +29,7 @@ pub struct Editor {
     pub selection_start: Option<(usize, usize)>,
     pub undo_stack: Vec<EditorState>,
     pub redo_stack: Vec<EditorState>,
+    pub overwrite_mode: bool,
 }
 
 impl Default for Editor {
@@ -51,11 +53,15 @@ impl Editor {
             selection_start: None,
             undo_stack: vec![EditorState { content: vec![String::from("Welcome to Clide!")], cursor_row: 0, cursor_col: 0 }],
             redo_stack: Vec::new(),
+            overwrite_mode: false,
         }
     }
 
     pub fn set_content(&mut self, path: PathBuf, content: String) {
         self.content = content.lines().map(String::from).collect();
+        if self.content.is_empty() {
+            self.content.push(String::new());
+        }
         self.path = Some(path);
         self.cursor_row = 0;
         self.cursor_col = 0;
@@ -78,17 +84,22 @@ impl Editor {
     pub fn push_undo_state(&mut self) {
         let last_state = self.undo_stack.last();
         let current_state = self.current_state();
-        if last_state.is_none_or(|s| s.content != current_state.content) {
+        if last_state.map_or(true, |s| s.content != current_state.content) {
             self.undo_stack.push(current_state);
+            if self.undo_stack.len() > MAX_UNDO_STATES {
+                self.undo_stack.remove(0);
+            }
             self.redo_stack.clear();
         }
     }
 
     pub fn undo(&mut self) {
-        if self.undo_stack.len() > 1 && let Some(state) = self.undo_stack.pop() {
-            self.redo_stack.push(state);
-            if let Some(last_state) = self.undo_stack.last() {
-                self.restore_state(last_state.clone());
+        if self.undo_stack.len() > 1 {
+            if let Some(state) = self.undo_stack.pop() {
+                self.redo_stack.push(state);
+                if let Some(last_state) = self.undo_stack.last() {
+                    self.restore_state(last_state.clone());
+                }
             }
         }
     }
@@ -108,11 +119,22 @@ impl Editor {
         self.dirty = true;
     }
 
+    pub fn toggle_overwrite_mode(&mut self) {
+        self.overwrite_mode = !self.overwrite_mode;
+    }
+
+    fn get_byte_index(&self, row: usize, char_col: usize) -> usize {
+        self.content.get(row)
+            .and_then(|line| line.char_indices().nth(char_col))
+            .map_or_else(
+                || self.content.get(row).map_or(0, |line| line.len()),
+                |(byte_idx, _)| byte_idx
+            )
+    }
+
     pub fn move_cursor_up(&mut self) {
-        if self.cursor_row > 0 {
-            self.cursor_row -= 1;
-            self.clamp_cursor_col();
-        }
+        self.cursor_row = self.cursor_row.saturating_sub(1);
+        self.clamp_cursor_col();
     }
 
     pub fn move_cursor_down(&mut self) {
@@ -127,12 +149,13 @@ impl Editor {
             self.cursor_col -= 1;
         } else if self.cursor_row > 0 {
             self.cursor_row -= 1;
-            self.cursor_col = self.content[self.cursor_row].len();
+            self.cursor_col = self.content[self.cursor_row].chars().count();
         }
     }
 
     pub fn move_cursor_right(&mut self) {
-        if self.cursor_col < self.content[self.cursor_row].len() {
+        let line_char_count = self.content.get(self.cursor_row).map_or(0, |line| line.chars().count());
+        if self.cursor_col < line_char_count {
             self.cursor_col += 1;
         } else if self.cursor_row < self.content.len() - 1 {
             self.cursor_row += 1;
@@ -141,41 +164,82 @@ impl Editor {
     }
 
     fn clamp_cursor_col(&mut self) {
-        let line_len = self.content.get(self.cursor_row).map_or(0, |line| line.len());
+        let line_len = self.content.get(self.cursor_row).map_or(0, |line| line.chars().count());
         self.cursor_col = min(self.cursor_col, line_len);
     }
 
     pub fn insert_text(&mut self, text: &str) {
         self.push_undo_state();
-        let current_line = &mut self.content[self.cursor_row];
-        current_line.insert_str(self.cursor_col, text);
-        self.cursor_col += text.len();
+        let byte_col = self.get_byte_index(self.cursor_row, self.cursor_col);
+        
+        if self.overwrite_mode {
+            let line_char_count = self.content[self.cursor_row].chars().count();
+            let text_char_count = text.chars().count();
+            if self.cursor_col < line_char_count {
+                let end_byte_col = self.get_byte_index(self.cursor_row, self.cursor_col + text_char_count.min(line_char_count - self.cursor_col));
+                self.content[self.cursor_row].replace_range(byte_col..end_byte_col, text);
+            } else {
+                self.content[self.cursor_row].push_str(text);
+            }
+        } else {
+            self.content[self.cursor_row].insert_str(byte_col, text);
+        }
+
+        self.cursor_col += text.chars().count();
         self.dirty = true;
         self.layout_cache.remove(&self.cursor_row);
     }
 
-    pub fn insert_tab(&mut self) {
+    pub fn paste_text(&mut self, text: &str) {
         self.push_undo_state();
-        let current_line = &mut self.content[self.cursor_row];
-        let tab = "    ";
-        current_line.insert_str(self.cursor_col, tab);
-        self.cursor_col += tab.len();
+        let mut lines: Vec<String> = text.lines().map(String::from).collect();
+        if lines.is_empty() { return; }
+
+        let first_line = lines.remove(0);
+        let byte_col = self.get_byte_index(self.cursor_row, self.cursor_col);
+        
+        // Insert first line at cursor
+        self.content[self.cursor_row].insert_str(byte_col, &first_line);
+        self.cursor_col += first_line.chars().count();
+
+        // Insert remaining lines
+        if !lines.is_empty() {
+            let rest_of_line = self.content[self.cursor_row].split_off(byte_col + first_line.len());
+            let last_pasted_line_len = lines.last().unwrap().chars().count();
+
+            // The last line from paste becomes the end of the current line
+            self.content[self.cursor_row].push_str(lines.pop().unwrap().as_str());
+            self.content[self.cursor_row].push_str(&rest_of_line);
+
+            // Insert the lines in between
+            for (i, line) in lines.into_iter().enumerate() {
+                self.content.insert(self.cursor_row + 1 + i, line);
+            }
+            
+            self.cursor_row += self.content.len() - 1;
+            self.cursor_col = last_pasted_line_len;
+        }
+
         self.dirty = true;
-        self.layout_cache.remove(&self.cursor_row);
+        self.layout_cache.clear();
     }
 
     pub fn delete_char(&mut self) {
         self.push_undo_state();
         if self.cursor_col > 0 {
-            let current_line = &mut self.content[self.cursor_row];
-            current_line.remove(self.cursor_col - 1);
+            let byte_col = self.get_byte_index(self.cursor_row, self.cursor_col);
+            let prev_char_byte_len = self.content[self.cursor_row][..byte_col].chars().last().map_or(0, |c| c.len_utf8());
+            let start_byte = byte_col - prev_char_byte_len;
+            
+            self.content[self.cursor_row].replace_range(start_byte..byte_col, "");
+            
             self.cursor_col -= 1;
             self.dirty = true;
             self.layout_cache.remove(&self.cursor_row);
         } else if self.cursor_row > 0 {
             let prev_line = self.content.remove(self.cursor_row);
             self.cursor_row -= 1;
-            self.cursor_col = self.content[self.cursor_row].len();
+            self.cursor_col = self.content[self.cursor_row].chars().count();
             self.content[self.cursor_row].push_str(&prev_line);
             self.dirty = true;
             self.layout_cache.clear();
@@ -184,9 +248,13 @@ impl Editor {
 
     pub fn delete_forward_char(&mut self) {
         self.push_undo_state();
-        let line_len = self.content[self.cursor_row].len();
-        if self.cursor_col < line_len {
-            self.content[self.cursor_row].remove(self.cursor_col);
+        let line_char_count = self.content[self.cursor_row].chars().count();
+        if self.cursor_col < line_char_count {
+            let byte_col = self.get_byte_index(self.cursor_row, self.cursor_col);
+            let next_char_byte_len = self.content[self.cursor_row][byte_col..].chars().next().map_or(0, |c| c.len_utf8());
+            
+            self.content[self.cursor_row].replace_range(byte_col..byte_col + next_char_byte_len, "");
+
             self.dirty = true;
             self.layout_cache.remove(&self.cursor_row);
         } else if self.cursor_row < self.content.len() - 1 {
@@ -199,8 +267,9 @@ impl Editor {
 
     pub fn insert_newline(&mut self) {
         self.push_undo_state();
+        let byte_col = self.get_byte_index(self.cursor_row, self.cursor_col);
         let current_line = &mut self.content[self.cursor_row];
-        let new_line_content = current_line.split_off(self.cursor_col);
+        let new_line_content = current_line.split_off(byte_col);
         self.content.insert(self.cursor_row + 1, new_line_content);
         self.cursor_row += 1;
         self.cursor_col = 0;
@@ -213,7 +282,7 @@ impl Editor {
     }
 
     pub fn move_cursor_end(&mut self) {
-        self.cursor_col = self.content[self.cursor_row].len();
+        self.cursor_col = self.content.get(self.cursor_row).map_or(0, |line| line.chars().count());
     }
 
     pub fn move_cursor_page_up(&mut self, page_size: usize) {
@@ -227,8 +296,28 @@ impl Editor {
     }
 
     pub fn move_cursor_to(&mut self, row: usize, col: usize) {
-        self.cursor_row = min(row, self.content.len() - 1);
+        self.cursor_row = min(row, self.content.len().saturating_sub(1));
         self.cursor_col = col;
         self.clamp_cursor_col();
+    }
+
+    pub fn get_word_under_cursor(&self) -> String {
+        let line = self.content.get(self.cursor_row).cloned().unwrap_or_default();
+        if line.is_empty() { return String::new(); }
+        
+        let mut start_idx = self.cursor_col;
+        let mut end_idx = self.cursor_col;
+
+        let chars: Vec<char> = line.chars().collect();
+
+        while start_idx > 0 && chars.get(start_idx - 1).map_or(false, |c| c.is_alphanumeric() || "/.:_".contains(*c)) {
+            start_idx -= 1;
+        }
+
+        while end_idx < chars.len() && chars.get(end_idx).map_or(false, |c| c.is_alphanumeric() || "/.:_".contains(*c)) {
+            end_idx += 1;
+        }
+        
+        chars[start_idx..end_idx].iter().collect()
     }
 }

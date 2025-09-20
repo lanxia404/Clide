@@ -2,6 +2,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
+const MAX_TERMINAL_OUTPUT_LINES: usize = 5000;
+
 pub struct TerminalState {
     pub command_history: Vec<String>,
     pub output_buffer: Vec<String>,
@@ -43,48 +45,60 @@ impl TerminalState {
         }
     }
 
+    fn truncate_buffer(&mut self) {
+        if self.output_buffer.len() > MAX_TERMINAL_OUTPUT_LINES {
+            let to_remove = self.output_buffer.len() - MAX_TERMINAL_OUTPUT_LINES;
+            self.output_buffer.drain(0..to_remove);
+        }
+    }
+
     pub fn poll_output(&mut self) {
         while let Ok(output_line) = self.output_rx.try_recv() {
             self.output_buffer.push(output_line);
         }
+        self.truncate_buffer();
     }
 
     fn execute_command(&mut self) {
         let command_str = self.input_line.trim().to_string();
         if command_str.is_empty() {
+            self.output_buffer.push("> ".to_string());
+            self.input_line.clear(); // Clear even if empty to reset prompt
+            self.truncate_buffer();
             return;
         }
 
         self.command_history.push(command_str.clone());
         self.output_buffer.push(format!("> {}", command_str));
+        self.truncate_buffer();
         self.input_line.clear();
 
-        let mut parts = command_str.split_whitespace();
-        let command = parts.next().unwrap_or("").to_string();
-        let args: Vec<String> = parts.map(String::from).collect();
         let tx = self.output_tx.clone();
 
         tokio::spawn(async move {
-            let output_result = Command::new(command).args(args).output().await;
+            let output_result = Command::new("bash")
+                .arg("-c")
+                .arg(command_str) // Execute the whole string in a shell
+                .output()
+                .await;
             match output_result {
                 Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    if !stdout.is_empty() {
-                        for line in stdout.trim().lines() {
-                            let _ = tx.send(line.to_string()).await;
-                        }
-                    }
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    if !stderr.is_empty() {
-                        for line in stderr.trim().lines() {
-                            let _ = tx.send(line.to_string()).await;
-                        }
-                    }
+                    send_output(&output.stdout, &tx).await;
+                    send_output(&output.stderr, &tx).await;
                 }
                 Err(e) => {
                     let _ = tx.send(format!("Error: {}", e)).await;
                 }
             }
         });
+    }
+}
+
+async fn send_output(buffer: &[u8], tx: &mpsc::Sender<String>) {
+    let text = String::from_utf8_lossy(buffer);
+    if !text.is_empty() {
+        for line in text.trim().lines() {
+            let _ = tx.send(line.to_string()).await;
+        }
     }
 }

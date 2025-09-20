@@ -8,7 +8,9 @@ use ratatui::{
 };
 
 pub fn render_git_panel(f: &mut Frame, area: Rect, state: &GitState, app: &App) {
-    let border_style = if app.active_panel == Some(crate::app::ActivePanel::Git) {
+    let is_active = app.active_panel == Some(crate::app::ActivePanel::Git);
+
+    let border_style = if is_active {
         Style::default().fg(Color::Cyan)
     } else {
         Style::default().fg(Color::White)

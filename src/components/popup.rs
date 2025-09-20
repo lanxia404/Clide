@@ -1,5 +1,5 @@
 use crate::app::App;
-use lsp_types;
+use lsp_types::{self, HoverContents, MarkedString};
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
@@ -9,6 +9,10 @@ use ratatui::{
 use super::header::ACCENT_COLOR;
 
 pub fn render_popup(app: &mut App, f: &mut Frame) {
+    if app.completion_list.is_none() && app.hover_info.is_none() {
+        return;
+    }
+
     let block = Block::default()
         .title("LSP Info")
         .borders(Borders::ALL)
@@ -25,6 +29,16 @@ pub fn render_popup(app: &mut App, f: &mut Frame) {
         height: popup_height,
     };
 
+    f.render_widget(Clear, popup_area);
+
+    if app.completion_list.is_some() {
+        render_completion_popup(f, app, popup_area, block);
+    } else if app.hover_info.is_some() {
+        render_hover_popup(f, app, popup_area, block);
+    }
+}
+
+fn render_completion_popup(f: &mut Frame, app: &App, area: Rect, block: Block) {
     if let Some(items) = &app.completion_list {
         let list_items: Vec<ListItem> = items
             .iter()
@@ -35,31 +49,34 @@ pub fn render_popup(app: &mut App, f: &mut Frame) {
                 } else {
                     Style::default()
                 };
-                ListItem::new(item.label.clone()).style(style)
+                ListItem::new(item.label.as_str()).style(style)
             })
             .collect();
 
         let list_widget = List::new(list_items).block(block);
-        f.render_widget(Clear, popup_area);
-        f.render_widget(list_widget, popup_area);
-    } else if let Some(hover) = &app.hover_info {
+        f.render_widget(list_widget, area);
+    }
+}
+
+fn render_hover_popup(f: &mut Frame, app: &App, area: Rect, block: Block) {
+    if let Some(hover) = &app.hover_info {
         let text = match &hover.contents {
-            lsp_types::HoverContents::Scalar(marked_string) => match marked_string {
-                lsp_types::MarkedString::String(text) => text.clone(),
-                lsp_types::MarkedString::LanguageString(lang_string) => lang_string.value.clone(),
-            },
-            lsp_types::HoverContents::Array(marked_strings) => marked_strings
+            HoverContents::Scalar(marked_string) => get_marked_string_text(marked_string),
+            HoverContents::Array(marked_strings) => marked_strings
                 .iter()
-                .map(|s| match s {
-                    lsp_types::MarkedString::String(text) => text.clone(),
-                    lsp_types::MarkedString::LanguageString(lang_string) => lang_string.value.clone(),
-                })
+                .map(get_marked_string_text)
                 .collect::<Vec<_>>()
                 .join("\n"),
-            _ => return,
+            HoverContents::Markup(_) => return, // Not handled for now
         };
         let paragraph = Paragraph::new(text).wrap(Wrap { trim: true }).block(block);
-        f.render_widget(Clear, popup_area);
-        f.render_widget(paragraph, popup_area);
+        f.render_widget(paragraph, area);
+    }
+}
+
+fn get_marked_string_text(marked_string: &MarkedString) -> String {
+    match marked_string {
+        MarkedString::String(text) => text.clone(),
+        MarkedString::LanguageString(lang_string) => lang_string.value.clone(),
     }
 }

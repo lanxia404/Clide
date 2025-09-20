@@ -13,13 +13,14 @@ Clide is a terminal-native IDE built with Rust, inspired by the principles and i
 - [x] Editor Enhancements (Line numbers, Current-line highlighting)
 - [x] Dual Icon System (Unicode and Nerd Font support)
 - [x] Internationalization (English, Simplified/Traditional Chinese)
+- [x] Full LSP Support (Diagnostics, hover info, code completion)
+- [x] Integrated Terminal Panel
+- [x] Git Integration Panel
+- [x] Plugin System
+- [x] Resizable Panels (Drag borders with the mouse)
 
 ### Planned Features
-- [ ] **Full LSP Support:** Diagnostics, hover info, code completion.
-- [ ] **Integrated Terminal:** A terminal panel directly within the IDE.
 - [ ] **AI Agent Interaction:** A dedicated panel for interacting with AI agents.
-- [ ] **Git Integration:** Manage your source control without leaving the editor.
-- [ ] **Plugin System:** Extend Clide's functionality with custom plugins.
 
 ## 🖥️ Layout
 
@@ -44,8 +45,11 @@ Clide is designed with a familiar three-panel layout:
 | Key         | Action                               |
 |-------------|--------------------------------------|
 | `Ctrl` + `Q`  | Quit the application                 |
-| `Tab`       | Toggle focus between panels          |
+| `Ctrl` + `W`  | Toggle focus between panels          |
+| `Ctrl` + `S`  | Save current file                    |
 | `Ctrl` + `L`  | Cycle through available languages    |
+| `Ctrl` + `T`  | Toggle Terminal panel                |
+| `Ctrl` + `G`  | Toggle Git panel                     |
 | `Enter`     | Open file or enter directory         |
 | `Arrow Keys`| Navigate within the focused panel    |
 

@@ -21,16 +21,21 @@ impl GitState {
     }
 
     pub async fn update(&mut self) {
+        // Reset state before fetching
+        self.current_branch = "unknown".to_string();
+        self.status = vec![];
+
         let branch_output = Command::new("git")
             .arg("branch")
             .arg("--show-current")
             .output()
             .await;
 
-        if let Ok(output) = branch_output {
-            if output.status.success() {
+        match branch_output {
+            Ok(output) if output.status.success() => {
                 self.current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            } else {
+            }
+            _ => {
                 self.current_branch = "not a git repo".to_string();
                 self.status = vec!["Not inside a Git repository.".to_string()];
                 return;
@@ -43,12 +48,17 @@ impl GitState {
             .output()
             .await;
         
-        if let Ok(output) = status_output && output.status.success() {
-            let status_text = String::from_utf8_lossy(&output.stdout);
-            if status_text.trim().is_empty() {
-                self.status = vec!["No changes.".to_string()];
-            } else {
-                self.status = status_text.trim().lines().map(String::from).collect();
+        match status_output {
+            Ok(output) if output.status.success() => {
+                let status_text = String::from_utf8_lossy(&output.stdout);
+                if status_text.trim().is_empty() {
+                    self.status = vec!["No changes.".to_string()];
+                } else {
+                    self.status = status_text.trim().lines().map(String::from).collect();
+                }
+            }
+            _ => {
+                self.status = vec!["Failed to get git status.".to_string()];
             }
         }
     }
